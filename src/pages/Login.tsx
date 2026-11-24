@@ -288,6 +288,19 @@ export const Login: React.FC = () => {
                   </button>
                 </p>
               </div>
+
+              {/* Quick Demo Button on Register Tab */}
+              <div className="pt-3 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={handleDemo}
+                  disabled={loading}
+                  className="w-full rounded-xl border border-slate-300 bg-white/80 hover:bg-white py-2.5 px-3 text-xs text-slate-800 font-semibold transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
+                  <span>Try Demo Account (Rahul Sharma)</span>
+                </button>
+              </div>
             </form>
           )}
 
@@ -374,7 +387,7 @@ export const Login: React.FC = () => {
 
         {/* Footer */}
         <p className="text-center text-[10px] text-white/90 font-medium drop-shadow-[0_1px_3px_rgba(0,0,0,0.6)]">
-          BudgetMitra · SkillUp Hackathon × IBM SkillsBuild · Student AI Track: Financial Literacy
+          BudgetMitra · Student Financial CoPilot & Intelligence Engine · CODEFESTTHON 2026
         </p>
       </div>
     </div>

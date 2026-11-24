@@ -16,6 +16,7 @@ export const DEFAULT_PROFILE_EMPTY: StudentProfile = {
   income_bracket: "1-3L",
   category: "Gen",
   preferred_language: "en",
+  hasCompletedOnboarding: false,
 };
 
 export const DEFAULT_BUDGETS_EMPTY: Record<string, number> = {

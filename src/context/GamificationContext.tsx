@@ -1,6 +1,7 @@
 // BudgetMitra Gamification & Streak Context Provider (GamificationContext.tsx)
 import React, { createContext, useContext, useState, useEffect } from "react";
 import confetti from "canvas-confetti";
+import { getUserScope, loadUserSlice, saveUserSlice } from "../utils/userStorage";
 
 export interface Badge {
   id: string;
@@ -35,51 +36,50 @@ const ALL_BADGES: Badge[] = [
 const GamificationContext = createContext<GamificationContextType | undefined>(undefined);
 
 export const GamificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const getCurrentScope = () => {
+    if (typeof window === "undefined") return "anonymous";
+    const currentEmail = localStorage.getItem("bm_current_user_email");
+    const isGuest = localStorage.getItem("bm_is_guest") === "true";
+    return getUserScope(currentEmail, isGuest);
+  };
+
   const [xp, setXp] = useState<number>(() => {
-    const val = localStorage.getItem("bm_xp");
-    return val ? parseInt(val) : 0; // Clean default XP
+    const scope = getCurrentScope();
+    return loadUserSlice<number>(scope, "xp", 0);
   });
 
   const [level, setLevel] = useState<number>(() => {
-    const val = localStorage.getItem("bm_level");
-    return val ? parseInt(val) : 1;
+    const scope = getCurrentScope();
+    return loadUserSlice<number>(scope, "level", 1);
   });
 
   const [streak, setStreak] = useState<number>(() => {
-    const val = localStorage.getItem("bm_streak");
-    return val ? parseInt(val) : 0; // Clean default streak
+    const scope = getCurrentScope();
+    return loadUserSlice<number>(scope, "streak", 0);
   });
 
   const [badges, setBadges] = useState<Badge[]>(() => {
-    try {
-      const val = localStorage.getItem("bm_badges");
-      return val ? JSON.parse(val) : []; // Clean default badges
-    } catch (e) {
-      console.warn("Failed to parse bm_badges from localStorage, falling back to seed data", e);
-      return [];
-    }
+    const scope = getCurrentScope();
+    return loadUserSlice<Badge[]>(scope, "badges", []);
   });
 
   // Logged days for the GitHub heatmap calendar
   const [loggingHistory, setLoggingHistory] = useState<string[]>(() => {
-    try {
-      const val = localStorage.getItem("bm_logging_history");
-      return val ? JSON.parse(val) : []; // Clean default history
-    } catch (e) {
-      console.warn("Failed to parse bm_logging_history from localStorage, falling back to seed data", e);
-      return [];
-    }
+    const scope = getCurrentScope();
+    return loadUserSlice<string[]>(scope, "logging_history", []);
   });
 
   const [unlockedBadge, setUnlockedBadge] = useState<Badge | null>(null);
 
-  // Persist State Updates
+  // Persist State Updates strictly into user scope
   useEffect(() => {
-    localStorage.setItem("bm_xp", xp.toString());
-    localStorage.setItem("bm_level", level.toString());
-    localStorage.setItem("bm_streak", streak.toString());
-    localStorage.setItem("bm_badges", JSON.stringify(badges));
-    localStorage.setItem("bm_logging_history", JSON.stringify(loggingHistory));
+    const scope = getCurrentScope();
+    if (scope === "anonymous") return;
+    saveUserSlice(scope, "xp", xp);
+    saveUserSlice(scope, "level", level);
+    saveUserSlice(scope, "streak", streak);
+    saveUserSlice(scope, "badges", badges);
+    saveUserSlice(scope, "logging_history", loggingHistory);
   }, [xp, level, streak, badges, loggingHistory]);
 
   // Level thresholds: Lvl 1 (0-300), Lvl 2 (300-800), Lvl 3 (800-1500), Lvl 4 (1500+)

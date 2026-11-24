@@ -204,6 +204,16 @@ export const Loans: React.FC = () => {
         </p>
       </div>
 
+      {/* Debt-Free / Simulation Info Banner */}
+      {loans.length === 0 && (
+        <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/60 dark:bg-indigo-950/20 p-4 text-xs flex items-center justify-between animate-in fade-in">
+          <div className="flex items-center gap-2.5 text-indigo-900 dark:text-indigo-300">
+            <span className="font-bold">✨ Debt-Free Account:</span>
+            <span>No active student loans logged. You are running in simulation mode — test parameters freely below.</span>
+          </div>
+        </div>
+      )}
+
       {/* Main interactive calculator */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         

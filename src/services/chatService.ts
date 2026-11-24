@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { supabase, isSupabaseConfigured } from "../utils/supabase/client";
 import { sanitizeInput } from "../utils/security";
+import { getUserScope, loadUserSlice, saveUserSlice } from "../utils/userStorage";
 
 export interface ChatMessage {
   id: string;
@@ -200,17 +201,15 @@ export async function loadRecentChatHistory(profileId: string | null): Promise<C
     }
   }
 
-  // Fallback to local storage
+  // Fallback to namespaced user storage
   try {
-    const saved = localStorage.getItem("bm_chat_messages");
-    if (saved) {
-      return JSON.parse(saved) as ChatMessage[];
-    }
+    const currentEmail = typeof window !== "undefined" ? localStorage.getItem("bm_current_user_email") : null;
+    const isGuest = typeof window !== "undefined" && localStorage.getItem("bm_is_guest") === "true";
+    const scope = getUserScope(profileId || currentEmail, isGuest);
+    return loadUserSlice<ChatMessage[]>(scope, "chat_messages", []);
   } catch {
-    /* ignore */
+    return [];
   }
-
-  return [];
 }
 
 export async function persistChatMessageToStorage(
@@ -225,18 +224,21 @@ export async function persistChatMessageToStorage(
     created_at: new Date().toISOString(),
   };
 
-  // Local storage save
+  // Local storage save namespaced by user scope
   try {
-    const saved = localStorage.getItem("bm_chat_messages");
-    const existing: ChatMessage[] = saved ? JSON.parse(saved) : [];
+    const currentEmail = typeof window !== "undefined" ? localStorage.getItem("bm_current_user_email") : null;
+    const isGuest = typeof window !== "undefined" && localStorage.getItem("bm_is_guest") === "true";
+    const scope = getUserScope(profileId || currentEmail, isGuest);
+    const existing = loadUserSlice<ChatMessage[]>(scope, "chat_messages", []);
     const updated = [...existing.slice(-25), newMsg];
-    localStorage.setItem("bm_chat_messages", JSON.stringify(updated));
+    saveUserSlice(scope, "chat_messages", updated);
   } catch {
     /* ignore */
   }
 
-  // Supabase save
-  if (isSupabaseConfigured() && profileId) {
+  // Supabase save (only for real accounts, never for guest)
+  const isGuest = typeof window !== "undefined" && localStorage.getItem("bm_is_guest") === "true";
+  if (isSupabaseConfigured() && profileId && !isGuest) {
     try {
       await supabase.from("chat_messages").insert({
         user_id: profileId,

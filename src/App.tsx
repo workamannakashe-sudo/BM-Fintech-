@@ -8,6 +8,7 @@ import { AskFinBuddyWidget } from "./components/AskFinBuddyWidget";
 import { QuickLogFab } from "./components/QuickLogFab";
 import { QuickLogModal } from "./components/QuickLogModal";
 import { BadgeCelebrationModal } from "./components/BadgeCelebrationModal";
+import { OnboardingModal } from "./components/OnboardingModal";
 import { Login } from "./pages/Login";
 
 // ── Lazily loaded sub-pages — each lands in its own JS chunk ──────────────
@@ -34,7 +35,7 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [quickLogOpen, setQuickLogOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { isAuthenticated } = useFinancial();
+  const { isAuthenticated, isGuest, logout, profile } = useFinancial();
 
   if (!isAuthenticated) {
     return <Login />;
@@ -79,6 +80,24 @@ function AppContent() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 lg:ml-64 transition-all duration-300">
+        {/* Persistent Demo Mode Banner */}
+        {isGuest && (
+          <div className="bg-amber-500/10 dark:bg-amber-950/40 border-b border-amber-500/30 px-4 py-2 text-amber-800 dark:text-amber-300 text-xs font-semibold flex items-center justify-between sticky top-0 z-40 backdrop-blur-md">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-[10px] font-bold uppercase tracking-wider">
+                Demo Mode
+              </span>
+              <span>Exploring with sample student data. Changes will not be saved to your account.</span>
+            </div>
+            <button
+              onClick={() => logout()}
+              className="px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-900 dark:text-amber-200 text-xs font-bold transition-all cursor-pointer"
+            >
+              Exit Demo
+            </button>
+          </div>
+        )}
+
         <main className="flex-1 w-full max-w-[1240px] mx-auto p-4 sm:p-6 lg:p-8 pb-28">
           {/* Top Universal Header */}
           <TopHeader
@@ -104,6 +123,9 @@ function AppContent() {
 
       {/* Confetti celebrate achievements toast overlays */}
       <BadgeCelebrationModal />
+
+      {/* First-time setup onboarding wizard for authenticated accounts */}
+      <OnboardingModal isOpen={!isGuest && isAuthenticated && profile.hasCompletedOnboarding === false} />
     </div>
   );
 }

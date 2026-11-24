@@ -49,8 +49,8 @@ export const Affordability: React.FC = () => {
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const daysLeftInMonth = Math.max(1, daysInMonth - now.getDate() + 1);
 
-  const monthlyAllowance = profile.monthlyAllowance > 0 ? profile.monthlyAllowance : (currency === "INR" ? 20000 : 2000);
-  const currentDiscretionary = Math.max(0, monthlyAllowance - totalSpentThisMonth) || (currency === "INR" ? 14500 : 450);
+  const monthlyAllowance = profile.monthlyAllowance > 0 ? profile.monthlyAllowance : (currency === "INR" ? 12000 : 500);
+  const currentDiscretionary = Math.max(0, monthlyAllowance - totalSpentThisMonth);
 
   const parsedPrice = parseFloat(itemPrice) || 0;
   const simulatedRemaining = Math.max(0, currentDiscretionary - parsedPrice);

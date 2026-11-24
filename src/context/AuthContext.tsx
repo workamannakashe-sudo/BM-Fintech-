@@ -2,8 +2,7 @@
 // ==========================================================
 // Owns: isAuthenticated, isGuest, userType, currency, preferredLanguage,
 //       supabaseStatus, dbProfileId, login, registerUser, loginAsGuest, logout.
-// Keeps all auth logic isolated so changes here never trigger re-renders in
-// components that only care about transactions or budgets.
+// Strict data isolation: authenticated accounts never load seed/demo records.
 // ==========================================================
 
 import React, { createContext, useContext, useState, useEffect } from "react";
@@ -19,13 +18,12 @@ import {
   DEFAULT_GOALS_USD_STUDENT,
   DEFAULT_LOANS_INR_STUDENT,
   DEFAULT_LOANS_USD_STUDENT,
-  DEFAULT_PROFILE_INR_STUDENT,
-  generateGuestTransactions,
   GUEST_GAMIFICATION_SEED,
 } from "../services/financialSeeds";
 import { loadUserSupabaseData } from "../services/supabaseFinancial";
+import { saveUserSlice, clearUserScope } from "../utils/userStorage";
 
-// ─── UserAccount registry helpers ────────────────────────────────────────────
+// ─── UserAccount registry helpers (offline local accounts) ───────────────────
 
 export interface UserAccount {
   email: string;
@@ -48,7 +46,9 @@ const getStoredUserAccounts = (): Record<string, UserAccount> => {
   try {
     const raw = localStorage.getItem(ACCOUNTS_KEY);
     if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return {};
 };
 
@@ -57,7 +57,9 @@ const saveUserAccountToRegistry = (account: UserAccount) => {
     const all = getStoredUserAccounts();
     all[account.email.toLowerCase()] = account;
     localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(all));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 };
 
 const findUserAccountInRegistry = (email: string): UserAccount | undefined => {
@@ -65,26 +67,6 @@ const findUserAccountInRegistry = (email: string): UserAccount | undefined => {
 };
 
 const DEMO_PASSWORD_HASH = "0ead2060b65992dca4769af601a1b3a35ef38cfad2c2c465bb160ea764157c5d";
-
-const ensureDemoAccount = (): UserAccount => {
-  const existing = findUserAccountInRegistry("rahul@budgetmitra.in");
-  if (existing) return existing;
-  const demo: UserAccount = {
-    email: "rahul@budgetmitra.in",
-    password: DEMO_PASSWORD_HASH,
-    name: "Rahul Sharma",
-    userType: "Student",
-    currency: "INR",
-    profile: DEFAULT_PROFILE_INR_STUDENT,
-    budgets: DEFAULT_BUDGETS_INR_STUDENT,
-    transactions: SEED_TRANSACTIONS_INR_STUDENT,
-    goals: DEFAULT_GOALS_INR_STUDENT,
-    loans: DEFAULT_LOANS_INR_STUDENT,
-    createdAt: new Date().toISOString(),
-  };
-  saveUserAccountToRegistry(demo);
-  return demo;
-};
 
 // ─── Context shape ────────────────────────────────────────────────────────────
 
@@ -108,7 +90,6 @@ export interface AuthContextType {
   setCurrency: (curr: "USD" | "INR") => void;
   setUserType: (type: "Student" | "Professional") => void;
   setPreferredLanguage: (lang: "en" | "hi" | "mr") => void;
-  /** Called by FinancialProvider after auth succeeds to seed ledger state */
   onAuthSuccess: (seed: AuthLedgerSeed) => void;
   login: (
     email: string,
@@ -131,13 +112,7 @@ export interface AuthContextType {
     currency: "USD" | "INR",
     monthlyAllowance?: number
   ) => void;
-  logout: (snapshot: {
-    profile: StudentProfile;
-    budgets: Record<string, number>;
-    transactions: Transaction[];
-    goals: SavingsGoal[];
-    loans: StudentLoan[];
-  }) => Promise<void>;
+  logout: (onBeforeClear?: () => void) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -147,7 +122,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{
   children: React.ReactNode;
   onAuthSuccess: (seed: AuthLedgerSeed) => void;
-}> = ({ children, onAuthSuccess }) => {
+  onLogoutClear?: () => void;
+}> = ({ children, onAuthSuccess, onLogoutClear }) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(
     () => localStorage.getItem("bm_authenticated") === "true"
   );
@@ -165,12 +141,19 @@ export const AuthProvider: React.FC<{
   );
   const [dbProfileId, setDbProfileId] = useState<string | null>(null);
 
-  const supabaseStatus: "connected" | "local" | "syncing" | "error" =
-    isSupabaseConfigured() ? "connected" : "local";
+  const supabaseStatus: "connected" | "local" | "syncing" | "error" = isSupabaseConfigured()
+    ? "connected"
+    : "local";
 
-  useEffect(() => { localStorage.setItem("bm_currency", currency); }, [currency]);
-  useEffect(() => { localStorage.setItem("bm_user_type", userType); }, [userType]);
-  useEffect(() => { localStorage.setItem("bm_language", preferredLanguage); }, [preferredLanguage]);
+  useEffect(() => {
+    localStorage.setItem("bm_currency", currency);
+  }, [currency]);
+  useEffect(() => {
+    localStorage.setItem("bm_user_type", userType);
+  }, [userType]);
+  useEffect(() => {
+    localStorage.setItem("bm_language", preferredLanguage);
+  }, [preferredLanguage]);
   useEffect(() => {
     localStorage.setItem("bm_authenticated", String(isAuthenticated));
     localStorage.setItem("bm_is_guest", String(isGuest));
@@ -184,22 +167,41 @@ export const AuthProvider: React.FC<{
       if (session?.user) {
         setIsAuthenticated(true);
         setIsGuest(false);
+        localStorage.setItem("bm_current_user_email", session.user.email || "");
         loadUserSupabaseData(session.user.email).then((d) => {
           if (d) {
             setDbProfileId(d.profileId);
-            onAuthSuccess({ profile: d.profile, budgets: d.budgets, transactions: d.transactions, goals: d.goals, loans: d.loans, dbProfileId: d.profileId });
+            onAuthSuccess({
+              profile: d.profile,
+              budgets: d.budgets,
+              transactions: d.transactions,
+              goals: d.goals,
+              loans: d.loans,
+              dbProfileId: d.profileId,
+            });
           }
         });
       }
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
       if (session?.user) {
         setIsAuthenticated(true);
         setIsGuest(false);
+        localStorage.setItem("bm_current_user_email", session.user.email || "");
         loadUserSupabaseData(session.user.email).then((d) => {
           if (d) {
             setDbProfileId(d.profileId);
-            onAuthSuccess({ profile: d.profile, budgets: d.budgets, transactions: d.transactions, goals: d.goals, loans: d.loans, dbProfileId: d.profileId });
+            onAuthSuccess({
+              profile: d.profile,
+              budgets: d.budgets,
+              transactions: d.transactions,
+              goals: d.goals,
+              loans: d.loans,
+              dbProfileId: d.profileId,
+            });
           }
         });
       } else if (!isGuest) {
@@ -207,8 +209,11 @@ export const AuthProvider: React.FC<{
         setDbProfileId(null);
       }
     });
-    return () => { subscription.unsubscribe(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    return () => {
+      subscription.unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGuest]);
 
   const setCurrency = (curr: "USD" | "INR") => setCurrencyState(curr);
@@ -229,26 +234,49 @@ export const AuthProvider: React.FC<{
     setUserTypeState(selectedUserType);
     setCurrencyState(selectedCurrency);
 
+    // Explicit demo account credentials route to guest mode
     if (normalizedEmail === "rahul@budgetmitra.in" && inputHash === DEMO_PASSWORD_HASH) {
-      const demo = ensureDemoAccount();
-      setIsAuthenticated(true); setIsGuest(false);
-      localStorage.setItem("bm_current_user_email", normalizedEmail);
-      onAuthSuccess({ profile: demo.profile, budgets: demo.budgets, transactions: demo.transactions, goals: demo.goals, loans: demo.loans });
-      setCurrencyState("INR"); setUserTypeState("Student");
+      loginAsGuest("Student", "INR", 15000);
       return { success: true };
     }
 
     if (isSupabaseConfigured()) {
       try {
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password: trimmedPassword });
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password: trimmedPassword,
+        });
+
         if (authData?.user && !authError) {
-          setIsAuthenticated(true); setIsGuest(false);
+          setIsAuthenticated(true);
+          setIsGuest(false);
           localStorage.setItem("bm_current_user_email", normalizedEmail);
+
           const remoteData = await loadUserSupabaseData(normalizedEmail);
           if (remoteData) {
             setDbProfileId(remoteData.profileId);
-            onAuthSuccess({ profile: remoteData.profile, budgets: remoteData.budgets, transactions: remoteData.transactions, goals: remoteData.goals, loans: remoteData.loans, dbProfileId: remoteData.profileId });
-            saveUserAccountToRegistry({ email: normalizedEmail, password: inputHash, name: remoteData.profile.name, userType: selectedUserType, currency: selectedCurrency, profile: remoteData.profile, budgets: remoteData.budgets, transactions: remoteData.transactions, goals: remoteData.goals, loans: remoteData.loans, dbProfileId: remoteData.profileId, createdAt: new Date().toISOString() });
+            onAuthSuccess({
+              profile: remoteData.profile,
+              budgets: remoteData.budgets,
+              transactions: remoteData.transactions,
+              goals: remoteData.goals,
+              loans: remoteData.loans,
+              dbProfileId: remoteData.profileId,
+            });
+            saveUserAccountToRegistry({
+              email: normalizedEmail,
+              password: inputHash,
+              name: remoteData.profile.name,
+              userType: selectedUserType,
+              currency: selectedCurrency,
+              profile: remoteData.profile,
+              budgets: remoteData.budgets,
+              transactions: remoteData.transactions,
+              goals: remoteData.goals,
+              loans: remoteData.loans,
+              dbProfileId: remoteData.profileId,
+              createdAt: new Date().toISOString(),
+            });
           }
           return { success: true };
         }
@@ -258,19 +286,45 @@ export const AuthProvider: React.FC<{
       }
     }
 
+    // Offline / Local accounts fallback
     const existingAccount = findUserAccountInRegistry(normalizedEmail);
     if (existingAccount) {
       if (isPlaintextPassword(existingAccount.password)) {
         const legacyHash = await hashPassword(existingAccount.password);
-        if (legacyHash === inputHash) { existingAccount.password = inputHash; saveUserAccountToRegistry(existingAccount); }
-        else return { success: false, error: "Incorrect password. Please verify your password and try again." };
+        if (legacyHash === inputHash) {
+          existingAccount.password = inputHash;
+          saveUserAccountToRegistry(existingAccount);
+        } else {
+          return { success: false, error: "Incorrect password. Please verify your password and try again." };
+        }
       }
+
       if (existingAccount.password === inputHash) {
-        setIsAuthenticated(true); setIsGuest(false);
+        setIsAuthenticated(true);
+        setIsGuest(false);
         localStorage.setItem("bm_current_user_email", normalizedEmail);
         if (existingAccount.dbProfileId) setDbProfileId(existingAccount.dbProfileId);
-        const loadedProfile = { ...existingAccount.profile, monthlyAllowance: monthlyAllowance || existingAccount.profile.monthlyAllowance || (selectedCurrency === "INR" ? 15000 : 650) };
-        onAuthSuccess({ profile: loadedProfile, budgets: existingAccount.budgets || (existingAccount.currency === "INR" ? DEFAULT_BUDGETS_INR_STUDENT : DEFAULT_BUDGETS_USD_STUDENT), transactions: existingAccount.transactions || (existingAccount.currency === "INR" ? SEED_TRANSACTIONS_INR_STUDENT : SEED_TRANSACTIONS_USD_STUDENT), goals: existingAccount.goals || (existingAccount.currency === "INR" ? DEFAULT_GOALS_INR_STUDENT : DEFAULT_GOALS_USD_STUDENT), loans: existingAccount.loans || (existingAccount.currency === "INR" ? DEFAULT_LOANS_INR_STUDENT : DEFAULT_LOANS_USD_STUDENT), dbProfileId: existingAccount.dbProfileId });
+
+        const loadedProfile: StudentProfile = {
+          ...existingAccount.profile,
+          monthlyAllowance:
+            monthlyAllowance || existingAccount.profile.monthlyAllowance || (selectedCurrency === "INR" ? 12000 : 500),
+          hasCompletedOnboarding:
+            existingAccount.profile.hasCompletedOnboarding !== undefined
+              ? existingAccount.profile.hasCompletedOnboarding
+              : true,
+        };
+
+        // Strictly load this user's data; NEVER fall back to seed data
+        onAuthSuccess({
+          profile: loadedProfile,
+          budgets: existingAccount.budgets || {},
+          transactions: existingAccount.transactions || [],
+          goals: existingAccount.goals || [],
+          loans: existingAccount.loans || [],
+          dbProfileId: existingAccount.dbProfileId,
+        });
+
         if (existingAccount.currency) setCurrencyState(existingAccount.currency);
         if (existingAccount.userType) setUserTypeState(existingAccount.userType);
         return { success: true };
@@ -278,70 +332,241 @@ export const AuthProvider: React.FC<{
         return { success: false, error: "Incorrect password. Please verify your password and try again." };
       }
     }
-    return { success: false, error: "No account found with this email. Please check your email or Sign Up first." };
+
+    return {
+      success: false,
+      error: "No account found with this email. Please check your email or Sign Up first.",
+    };
   };
 
-  const registerUser = async (email: string, password: string, name: string, selectedUserType: "Student" | "Professional", selectedCurrency: "USD" | "INR", monthlyAllowance?: number, additionalDetails?: Partial<StudentProfile>): Promise<{ success: boolean; error?: string }> => {
+  const registerUser = async (
+    email: string,
+    password: string,
+    name: string,
+    selectedUserType: "Student" | "Professional",
+    selectedCurrency: "USD" | "INR",
+    monthlyAllowance?: number,
+    additionalDetails?: Partial<StudentProfile>
+  ): Promise<{ success: boolean; error?: string }> => {
     const normalizedEmail = email.trim().toLowerCase();
     const trimmedPassword = password.trim();
     const cleanName = name.trim();
-    setUserTypeState(selectedUserType); setCurrencyState(selectedCurrency);
-    const allowanceValue = monthlyAllowance || (selectedCurrency === "INR" ? 15000 : 650);
-    const newProfile: StudentProfile = { name: cleanName, major: additionalDetails?.major || additionalDetails?.course || "B.Tech Computer Science", gpa: 8.5, academicYear: `${additionalDetails?.year || 1}st Year`, incomeTier: additionalDetails?.income_bracket || "1-3L", firstGen: false, interests: ["FinTech", "Academics", "Student Life"], monthlyAllowance: allowanceValue, course: additionalDetails?.course || "B.Tech", year: additionalDetails?.year || 1, state: additionalDetails?.state || "Maharashtra", income_bracket: additionalDetails?.income_bracket || "1-3L", category: additionalDetails?.category || "Gen", preferred_language: (additionalDetails?.preferred_language as "en" | "hi" | "mr") || preferredLanguage || "en" };
-    const initialBudgets = selectedCurrency === "INR" ? { ...DEFAULT_BUDGETS_INR_STUDENT } : { ...DEFAULT_BUDGETS_USD_STUDENT };
-    const initialTransactions = selectedCurrency === "INR" ? [...SEED_TRANSACTIONS_INR_STUDENT] : [...SEED_TRANSACTIONS_USD_STUDENT];
-    const initialGoals = selectedCurrency === "INR" ? [...DEFAULT_GOALS_INR_STUDENT] : [...DEFAULT_GOALS_USD_STUDENT];
-    const initialLoans = selectedCurrency === "INR" ? [...DEFAULT_LOANS_INR_STUDENT] : [...DEFAULT_LOANS_USD_STUDENT];
+
+    setUserTypeState(selectedUserType);
+    setCurrencyState(selectedCurrency);
+
+    const allowanceValue = monthlyAllowance || (selectedCurrency === "INR" ? 12000 : 500);
+
+    // Initial user profile: fresh account starts with 0 transactions and onboarding flag
+    const newProfile: StudentProfile = {
+      name: cleanName,
+      major: additionalDetails?.major || additionalDetails?.course || "B.Tech Computer Science",
+      gpa: 8.5,
+      academicYear: `${additionalDetails?.year || 1}st Year`,
+      incomeTier: additionalDetails?.income_bracket || "1-3L",
+      firstGen: false,
+      interests: ["Smart Budgeting", "Academics", "Student Life"],
+      monthlyAllowance: allowanceValue,
+      course: additionalDetails?.course || "B.Tech",
+      year: additionalDetails?.year || 1,
+      state: additionalDetails?.state || "Maharashtra",
+      income_bracket: additionalDetails?.income_bracket || "1-3L",
+      category: additionalDetails?.category || "Gen",
+      preferred_language: (additionalDetails?.preferred_language as "en" | "hi" | "mr") || preferredLanguage || "en",
+      hasCompletedOnboarding: false, // Triggers interactive onboarding
+    };
+
+    // Brand new user: ZERO fake transactions, ZERO fake goals, ZERO fake loans
+    const initialBudgets: Record<string, number> = {};
+    const initialTransactions: Transaction[] = [];
+    const initialGoals: SavingsGoal[] = [];
+    const initialLoans: StudentLoan[] = [];
+
     let registeredProfileId: string | null = null;
+
     if (isSupabaseConfigured()) {
       try {
-        const { data: signUpData, error } = await supabase.auth.signUp({ email: normalizedEmail, password: trimmedPassword, options: { data: { name: cleanName, userType: selectedUserType } } });
-        if (!error && signUpData?.user) { registeredProfileId = signUpData.user.id; setDbProfileId(registeredProfileId); }
-      } catch (err: any) { console.warn("Supabase registration warning:", err); }
+        const { data: signUpData, error } = await supabase.auth.signUp({
+          email: normalizedEmail,
+          password: trimmedPassword,
+          options: {
+            data: {
+              name: cleanName,
+              userType: selectedUserType,
+            },
+          },
+        });
+
+        if (!error && signUpData?.user) {
+          registeredProfileId = signUpData.user.id;
+          setDbProfileId(registeredProfileId);
+
+          // Insert clean profile row into Supabase
+          await supabase.from("profiles").upsert({
+            id: registeredProfileId,
+            email: normalizedEmail,
+            name: cleanName,
+            monthly_allowance: allowanceValue,
+            course: newProfile.course,
+            year: newProfile.year,
+            state: newProfile.state,
+            category: newProfile.category,
+            income_bracket: newProfile.income_bracket,
+            has_completed_onboarding: false,
+          });
+        }
+      } catch (err: any) {
+        console.warn("Supabase registration warning:", err);
+      }
     }
+
     const passwordHash = await hashPassword(trimmedPassword);
-    const userAccount: UserAccount = { email: normalizedEmail, password: passwordHash, name: cleanName, userType: selectedUserType, currency: selectedCurrency, profile: newProfile, budgets: initialBudgets, transactions: initialTransactions, goals: initialGoals, loans: initialLoans, dbProfileId: registeredProfileId, createdAt: new Date().toISOString() };
+    const userAccount: UserAccount = {
+      email: normalizedEmail,
+      password: passwordHash,
+      name: cleanName,
+      userType: selectedUserType,
+      currency: selectedCurrency,
+      profile: newProfile,
+      budgets: initialBudgets,
+      transactions: initialTransactions,
+      goals: initialGoals,
+      loans: initialLoans,
+      dbProfileId: registeredProfileId,
+      createdAt: new Date().toISOString(),
+    };
+
     saveUserAccountToRegistry(userAccount);
     localStorage.setItem("bm_current_user_email", normalizedEmail);
-    setIsAuthenticated(true); setIsGuest(false);
-    onAuthSuccess({ profile: newProfile, budgets: initialBudgets, transactions: initialTransactions, goals: initialGoals, loans: initialLoans, dbProfileId: registeredProfileId });
+    setIsAuthenticated(true);
+    setIsGuest(false);
+
+    onAuthSuccess({
+      profile: newProfile,
+      budgets: initialBudgets,
+      transactions: initialTransactions,
+      goals: initialGoals,
+      loans: initialLoans,
+      dbProfileId: registeredProfileId,
+    });
+
     return { success: true };
   };
 
-  const loginAsGuest = (selectedUserType: "Student" | "Professional", selectedCurrency: "USD" | "INR", monthlyAllowance?: number) => {
-    setUserTypeState(selectedUserType); setCurrencyState(selectedCurrency);
-    setIsAuthenticated(true); setIsGuest(true);
-    const allowance = monthlyAllowance || (selectedCurrency === "INR" ? 12000 : 500);
-    const guestProfile: StudentProfile = { name: "Guest Student", major: "B.Tech Computer Science", gpa: 7.8, academicYear: "2nd Year", incomeTier: "1-3L", firstGen: false, interests: ["Campus Life", "Smart Budgeting"], monthlyAllowance: allowance, course: "B.Tech", year: 2, state: "Maharashtra", income_bracket: "1-3L", category: "Gen", preferred_language: "en" };
-    const guestBudgets: Record<string, number> = selectedCurrency === "INR" ? { food: 4000, rent: 5000, travel: 1200, entertainment: 800, books: 1000, other: 1000 } : { food: 150, rent: 250, travel: 40, entertainment: 30, books: 30, other: 50 };
-    const guestGoals = selectedCurrency === "INR" ? [{ id: "gg1", name: "Emergency Tech Reserve", target: 15000, current: 6500 }, { id: "gg2", name: "Goa Trip Pool", target: 8000, current: 2000 }] : [{ id: "gg1", name: "Laptop Upgrade Fund", target: 800, current: 320 }, { id: "gg2", name: "Vacation Savings", target: 400, current: 100 }];
-    const guestLoans = selectedCurrency === "INR" ? [{ id: "gl1", name: "Vidya Lakshmi Education Loan", principal: 200000, interestRate: 8.5, termMonths: 60, extraPayment: 500, type: "Subsidized" as const }] : [{ id: "gl1", name: "Federal Student Loan", principal: 5000, interestRate: 4.99, termMonths: 120, extraPayment: 20, type: "Subsidized" as const }];
-    const guestTransactions = selectedCurrency === "INR" ? generateGuestTransactions() : [];
-    localStorage.setItem("bm_xp", String(GUEST_GAMIFICATION_SEED.xp));
-    localStorage.setItem("bm_level", String(GUEST_GAMIFICATION_SEED.level));
-    localStorage.setItem("bm_streak", String(GUEST_GAMIFICATION_SEED.streak));
-    localStorage.setItem("bm_badges", JSON.stringify(GUEST_GAMIFICATION_SEED.badges));
-    localStorage.setItem("bm_logging_history", JSON.stringify(GUEST_GAMIFICATION_SEED.loggingHistory));
-    onAuthSuccess({ profile: guestProfile, budgets: guestBudgets, transactions: guestTransactions.length > 0 ? guestTransactions : (selectedCurrency === "INR" ? SEED_TRANSACTIONS_INR_STUDENT : SEED_TRANSACTIONS_USD_STUDENT), goals: guestGoals, loans: guestLoans });
+  const loginAsGuest = (
+    selectedUserType: "Student" | "Professional",
+    selectedCurrency: "USD" | "INR",
+    monthlyAllowance?: number
+  ) => {
+    setUserTypeState(selectedUserType);
+    setCurrencyState(selectedCurrency);
+    setIsAuthenticated(true);
+    setIsGuest(true);
+    localStorage.setItem("bm_current_user_email", "guest@budgetmitra.demo");
+
+    const allowance = monthlyAllowance || (selectedCurrency === "INR" ? 15000 : 650);
+
+    const guestProfile: StudentProfile = {
+      name: "Demo Student (Rahul)",
+      major: "B.Tech Computer Science",
+      gpa: 8.8,
+      academicYear: "3rd Year",
+      incomeTier: "1-3L",
+      firstGen: true,
+      interests: ["Campus Life", "Smart Budgeting"],
+      monthlyAllowance: allowance,
+      course: "B.Tech",
+      year: 3,
+      state: "Maharashtra",
+      income_bracket: "1-3L",
+      category: "OBC",
+      preferred_language: "en",
+      hasCompletedOnboarding: true,
+    };
+
+    const guestBudgets: Record<string, number> =
+      selectedCurrency === "INR"
+        ? { ...DEFAULT_BUDGETS_INR_STUDENT }
+        : { ...DEFAULT_BUDGETS_USD_STUDENT };
+
+    const guestGoals =
+      selectedCurrency === "INR"
+        ? [...DEFAULT_GOALS_INR_STUDENT]
+        : [...DEFAULT_GOALS_USD_STUDENT];
+
+    const guestLoans =
+      selectedCurrency === "INR"
+        ? [...DEFAULT_LOANS_INR_STUDENT]
+        : [...DEFAULT_LOANS_USD_STUDENT];
+
+    const guestTransactions =
+      selectedCurrency === "INR"
+        ? [...SEED_TRANSACTIONS_INR_STUDENT]
+        : [...SEED_TRANSACTIONS_USD_STUDENT];
+
+    // Seed guest gamification
+    saveUserSlice("guest", "xp", GUEST_GAMIFICATION_SEED.xp);
+    saveUserSlice("guest", "level", GUEST_GAMIFICATION_SEED.level);
+    saveUserSlice("guest", "streak", GUEST_GAMIFICATION_SEED.streak);
+    saveUserSlice("guest", "badges", GUEST_GAMIFICATION_SEED.badges);
+
+    onAuthSuccess({
+      profile: guestProfile,
+      budgets: guestBudgets,
+      transactions: guestTransactions,
+      goals: guestGoals,
+      loans: guestLoans,
+      dbProfileId: null, // Guests never write to Supabase
+    });
   };
 
-  const logout = async (snapshot: { profile: StudentProfile; budgets: Record<string, number>; transactions: Transaction[]; goals: SavingsGoal[]; loans: StudentLoan[] }) => {
-    const currentEmail = localStorage.getItem("bm_current_user_email");
-    if (currentEmail) {
-      const existing = findUserAccountInRegistry(currentEmail);
-      if (existing) saveUserAccountToRegistry({ ...existing, ...snapshot, currency, userType });
+  const logout = async () => {
+    // If guest, clear guest storage scope completely
+    if (isGuest) {
+      clearUserScope("guest");
     }
+
     if (isSupabaseConfigured()) {
-      try { await supabase.auth.signOut(); } catch { /* ignore */ }
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        /* ignore */
+      }
     }
-    setIsAuthenticated(false); setIsGuest(false); setDbProfileId(null);
+
+    setIsAuthenticated(false);
+    setIsGuest(false);
+    setDbProfileId(null);
+
     localStorage.removeItem("bm_authenticated");
     localStorage.removeItem("bm_is_guest");
     localStorage.removeItem("bm_current_user_email");
+
+    if (onLogoutClear) {
+      onLogoutClear();
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isGuest, userType, currency, preferredLanguage, supabaseStatus, dbProfileId, setCurrency, setUserType, setPreferredLanguage, onAuthSuccess, login, registerUser, loginAsGuest, logout }}>
+    <AuthContext.Provider
+      value={{
+        isAuthenticated,
+        isGuest,
+        userType,
+        currency,
+        preferredLanguage,
+        supabaseStatus,
+        dbProfileId,
+        setCurrency,
+        setUserType,
+        setPreferredLanguage,
+        onAuthSuccess,
+        login,
+        registerUser,
+        loginAsGuest,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -23,7 +23,7 @@ interface DashboardProps {
   onOpenQuickLog?: () => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickLog }) => {
   const {
     profile,
     transactions,
@@ -138,12 +138,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
         fee: currency === "INR" ? "₹0.00" : "$0.00"
       }));
     }
-    return [
-      { id: "Txn_...C3Nv", date: "31 Mar 2026", customer: "Flivia Hartman", amount: 2480.00, method: "Credit Card", status: "Settled", fee: "$72.00" },
-      { id: "Txn_...X1Yz", date: "29 Mar 2026", customer: "Marcus Riley", amount: 540.00, method: "Bank Transfer", status: "Processing", fee: "$10.80" },
-      { id: "Txn_...A9Bc", date: "28 Mar 2026", customer: "Campus Bookstore", amount: 112.50, method: "UPI Transfer", status: "Settled", fee: "$0.00" },
-      { id: "Txn_...K4Lm", date: "27 Mar 2026", customer: "Le Ju' Bistro", amount: 65.00, method: "Credit Card", status: "Settled", fee: "$1.50" },
-    ];
+    return [];
   }, [transactions, currency]);
 
   const handleDownloadPDF = () => {
@@ -600,7 +595,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/80 text-xs">
-              {transactionRows.map((tx, idx) => (
+              {transactionRows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center">
+                    <div className="flex flex-col items-center justify-center gap-1.5">
+                      <p className="text-sm font-semibold text-slate-700 dark:text-zinc-300">
+                        No transactions recorded yet
+                      </p>
+                      <p className="text-xs text-slate-400 dark:text-zinc-500">
+                        Log your first college expense to activate burn rate tracking
+                      </p>
+                      <button
+                        onClick={() => {
+                          if (onOpenQuickLog) onOpenQuickLog();
+                          else setActiveTab("expenses");
+                        }}
+                        className="mt-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-sm cursor-pointer"
+                      >
+                        + Log First Expense
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                transactionRows.map((tx, idx) => (
                 <tr
                   key={idx}
                   className="hover:bg-slate-50/60 dark:hover:bg-zinc-900/50 transition-colors text-slate-700 dark:text-zinc-300"
@@ -633,7 +651,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
                     {tx.fee}
                   </td>
                 </tr>
-              ))}
+              )))
+            }
             </tbody>
           </table>
         </div>

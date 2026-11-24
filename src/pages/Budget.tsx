@@ -19,6 +19,7 @@ export const Budget: React.FC = () => {
     updateGoalSavings,
     deleteSavingsGoal,
     currency,
+    transactions,
   } = useFinancial();
 
   // New goal form states
@@ -39,18 +40,20 @@ export const Budget: React.FC = () => {
 
   // Category spent aggregation
   const categorySpent = useMemo(() => {
-    const list = useFinancial().transactions;
+    const list = transactions;
     const totals: Record<string, number> = {};
     for (const key of Object.keys(budgets)) {
       totals[key] = 0;
     }
+    const now = new Date();
     list.forEach(t => {
-      if (t.date.startsWith("2026-08")) {
+      const d = new Date(t.date);
+      if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) {
         totals[t.category] = (totals[t.category] || 0) + t.amount;
       }
     });
     return totals;
-  }, [useFinancial().transactions, budgets]);
+  }, [transactions, budgets]);
 
   // Safe Burn rate calculation: totalBudgetLimit / 30
   const safeDailyBurnRate = totalBudgetLimit / 30;

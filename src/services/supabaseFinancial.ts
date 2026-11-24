@@ -12,13 +12,16 @@ export interface SupabaseHydratedData {
 }
 
 /**
- * Loads and maps all user financial data from Supabase tables
+ * Loads and maps all user financial data from Supabase tables.
+ * Returns ONLY data belonging to the authenticated user.
+ * Never injects seed or demo records.
  */
 export async function loadUserSupabaseData(userEmail?: string): Promise<SupabaseHydratedData | null> {
   if (!isSupabaseConfigured()) return null;
 
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: authUserRes } = await supabase.auth.getUser();
+    const user = authUserRes?.user;
     if (!user && !userEmail) return null;
 
     // Fetch Profile
@@ -26,66 +29,85 @@ export async function loadUserSupabaseData(userEmail?: string): Promise<Supabase
       ? supabase.from("profiles").select("*").eq("id", user.id).single()
       : supabase.from("profiles").select("*").eq("email", userEmail).single();
 
-    const { data: profileData, error: profileError } = await profileQuery;
-    if (profileError || !profileData) return null;
+    let { data: profileData, error: profileError } = await profileQuery;
+
+    // If profile doesn't exist yet for an authenticated user, create a minimal user profile row
+    if ((profileError || !profileData) && user) {
+      const fallbackName = user.user_metadata?.name || user.email?.split("@")[0] || "Student";
+      const insertRes = await supabase.from("profiles").insert({
+        id: user.id,
+        email: user.email,
+        name: fallbackName,
+        monthly_allowance: 12000,
+        has_completed_onboarding: false,
+      }).select().single();
+
+      if (!insertRes.error && insertRes.data) {
+        profileData = insertRes.data;
+      }
+    }
+
+    if (!profileData) return null;
 
     const profileId = profileData.id;
 
-    // Fetch Transactions, Budgets, Goals, Loans in parallel
+    // Fetch Transactions, Budgets, Goals, Loans in parallel (scoped to user_id)
     const [txRes, budgetRes, goalRes, loanRes] = await Promise.all([
-      supabase.from("transactions").select("*").eq("profile_id", profileId).order("date", { ascending: false }),
-      supabase.from("budgets").select("*").eq("profile_id", profileId),
-      supabase.from("savings_goals").select("*").eq("profile_id", profileId),
-      supabase.from("loans").select("*").eq("profile_id", profileId),
+      supabase.from("transactions").select("*").or(`user_id.eq.${profileId},profile_id.eq.${profileId}`).order("date", { ascending: false }),
+      supabase.from("budgets").select("*").or(`user_id.eq.${profileId},profile_id.eq.${profileId}`),
+      supabase.from("savings_goals").select("*").or(`user_id.eq.${profileId},profile_id.eq.${profileId}`),
+      supabase.from("student_loans").select("*").or(`user_id.eq.${profileId},profile_id.eq.${profileId}`),
     ]);
 
     const mappedProfile: StudentProfile = {
-      name: profileData.name || "Student",
-      major: profileData.major || "B.Tech",
-      gpa: profileData.gpa || 3.8,
-      academicYear: profileData.academic_year || "3rd Year",
-      incomeTier: profileData.income_tier || "Tier-2",
-      firstGen: profileData.first_gen || false,
+      name: profileData.name || profileData.full_name || "Student",
+      major: profileData.major || profileData.course || "B.Tech",
+      gpa: Number(profileData.gpa) || 3.8,
+      academicYear: profileData.academic_year || `${profileData.year || 2}nd Year`,
+      incomeTier: profileData.income_tier || profileData.income_bracket || "1-3L",
+      firstGen: Boolean(profileData.first_gen),
       interests: profileData.interests || [],
-      monthlyAllowance: profileData.monthly_allowance || 15000,
+      monthlyAllowance: Number(profileData.monthly_allowance) || 12000,
       course: profileData.course || "B.Tech",
-      year: profileData.year || 3,
+      year: Number(profileData.year) || 2,
       state: profileData.state || "Maharashtra",
       income_bracket: profileData.income_bracket || "1-3L",
       category: profileData.category || "Gen",
       preferred_language: profileData.preferred_language || "en",
+      hasCompletedOnboarding: Boolean(profileData.has_completed_onboarding),
     };
 
     const mappedTransactions: Transaction[] = (txRes.data || []).map((t: any) => ({
-      id: t.id,
-      date: t.date,
-      description: t.description,
-      amount: Number(t.amount),
-      category: t.category,
+      id: String(t.id),
+      date: t.date || (t.created_at ? t.created_at.split("T")[0] : new Date().toISOString().split("T")[0]),
+      description: t.description || "Expense",
+      amount: Number(t.amount) || 0,
+      category: t.category || "Other",
       isAnomaly: Boolean(t.is_anomaly),
       anomalyExplanation: t.anomaly_explanation || undefined,
     }));
 
     const mappedBudgets: Record<string, number> = {};
     (budgetRes.data || []).forEach((b: any) => {
-      mappedBudgets[b.category] = Number(b.monthly_limit);
+      const limit = Number(b.allocated !== undefined ? b.allocated : b.monthly_limit) || 0;
+      mappedBudgets[b.category] = limit;
     });
 
     const mappedGoals: SavingsGoal[] = (goalRes.data || []).map((g: any) => ({
-      id: g.id,
-      name: g.name,
-      target: Number(g.target_amount),
-      current: Number(g.current_amount),
+      id: String(g.id),
+      name: g.name || g.title || "Savings Target",
+      target: Number(g.target_amount) || 0,
+      current: Number(g.current_amount) || 0,
     }));
 
     const mappedLoans: StudentLoan[] = (loanRes.data || []).map((l: any) => ({
-      id: l.id,
-      name: l.name,
-      principal: Number(l.principal),
-      interestRate: Number(l.interest_rate),
-      termMonths: Number(l.term_months),
+      id: String(l.id),
+      name: l.name || "Student Loan",
+      principal: Number(l.principal) || 0,
+      interestRate: Number(l.interest_rate) || 0,
+      termMonths: Number(l.term_months) || 0,
       extraPayment: Number(l.extra_payment || 0),
-      type: l.type || "Subsidized",
+      type: l.loan_type || l.type || "Subsidized",
     }));
 
     return {

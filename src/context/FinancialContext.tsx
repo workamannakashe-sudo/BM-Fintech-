@@ -2,13 +2,6 @@
 // =========================================================================
 // This file is the SINGLE public API surface for all consumers via useFinancial().
 // Internally it composes AuthContext + LedgerContext — all logic lives there.
-//
-// SPLITTING RATIONALE:
-//   • AuthProvider  — auth state (isAuthenticated, login, register, logout)
-//   • LedgerProvider — ledger state (transactions, budgets, goals, loans, profile)
-//   • FinancialProvider (here) — wires the two together, seeds ledger after auth
-//
-// ZERO BREAKING CHANGES: useFinancial() returns the exact same shape as before.
 // =========================================================================
 
 import React, { createContext, useContext } from "react";
@@ -16,7 +9,7 @@ import { AuthProvider, useAuth } from "./AuthContext";
 import { LedgerProvider, useLedger } from "./LedgerContext";
 import type { HealthBreakdown } from "../utils/health";
 
-// ─── Public domain types (re-exported so consumers keep the same imports) ────
+// ─── Public domain types ─────────────────────────────────────────────────────
 
 export interface Transaction {
   id: string;
@@ -43,6 +36,7 @@ export interface StudentProfile {
   income_bracket?: "below_1L" | "1-3L" | "3-8L" | "above_8L";
   category?: "Gen" | "OBC" | "SC" | "ST" | "EWS";
   preferred_language?: "en" | "hi" | "mr";
+  hasCompletedOnboarding?: boolean;
 }
 
 export interface SavingsGoal {
@@ -77,7 +71,7 @@ export interface UserAccount {
   createdAt: string;
 }
 
-// ─── Unified context type (identical public surface to original) ─────────────
+// ─── Unified context type ─────────────────────────────────────────────────────
 
 interface FinancialContextType {
   // Ledger
@@ -108,6 +102,12 @@ interface FinancialContextType {
   deleteSavingsGoal: (id: string) => void;
   updateLoanExtraPayment: (id: string, extraPayment: number) => void;
   resetDemoData: () => void;
+  completeOnboarding: (data: {
+    profileUpdates?: Partial<StudentProfile>;
+    envelopes?: Record<string, number>;
+    initialGoal?: { name: string; target: number; current?: number };
+    initialLoan?: { name: string; principal: number; interestRate: number; termMonths: number; extraPayment?: number };
+  }) => void;
   // Auth
   currency: "USD" | "INR";
   userType: "Student" | "Professional";
@@ -132,43 +132,68 @@ const FinancialBridge: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const auth = useAuth();
   const ledger = useLedger();
 
-  // Wrap ledger mutations that need dbProfileId from auth
+  // Wrap ledger mutations with auth credentials and guest safety
   const updateProfile = (updates: Partial<StudentProfile>) =>
-    ledger.updateProfile(updates, auth.dbProfileId);
+    ledger.updateProfile(updates, auth.dbProfileId, auth.isGuest);
 
   const addTransaction = (description: string, amount: number, date?: string, category?: string) =>
-    ledger.addTransaction(description, amount, date, category, auth.dbProfileId);
+    ledger.addTransaction(description, amount, date, category, auth.dbProfileId, auth.isGuest);
 
   const deleteTransaction = (id: string) =>
-    ledger.deleteTransaction(id, auth.dbProfileId);
+    ledger.deleteTransaction(id, auth.dbProfileId, auth.isGuest);
 
   const updateBudgetLimit = (category: string, limit: number) =>
-    ledger.updateBudgetLimit(category, limit, auth.dbProfileId);
+    ledger.updateBudgetLimit(category, limit, auth.dbProfileId, auth.isGuest);
 
   const addSavingsGoal = (name: string, target: number, current: number) =>
-    ledger.addSavingsGoal(name, target, current, auth.dbProfileId);
+    ledger.addSavingsGoal(name, target, current, auth.dbProfileId, auth.isGuest);
 
   const deleteSavingsGoal = (id: string) =>
-    ledger.deleteSavingsGoal(id, auth.dbProfileId);
+    ledger.deleteSavingsGoal(id, auth.dbProfileId, auth.isGuest);
 
   const resetDemoData = () =>
     ledger.resetDemoData(auth.currency, auth.userType);
 
-  // setPreferredLanguage also updates profile.preferred_language
   const setPreferredLanguage = (lang: "en" | "hi" | "mr") => {
     auth.setPreferredLanguage(lang);
-    ledger.updateProfile({ preferred_language: lang }, auth.dbProfileId);
+    ledger.updateProfile({ preferred_language: lang }, auth.dbProfileId, auth.isGuest);
   };
 
-  // logout needs to snapshot current ledger state
-  const logout = () =>
-    auth.logout({
-      profile: ledger.profile,
-      budgets: ledger.budgets,
-      transactions: ledger.transactions,
-      goals: ledger.goals,
-      loans: ledger.loans,
-    });
+  const completeOnboarding = (data: {
+    profileUpdates?: Partial<StudentProfile>;
+    envelopes?: Record<string, number>;
+    initialGoal?: { name: string; target: number; current?: number };
+    initialLoan?: { name: string; principal: number; interestRate: number; termMonths: number; extraPayment?: number };
+  }) => {
+    ledger.updateProfile(
+      {
+        ...data.profileUpdates,
+        hasCompletedOnboarding: true,
+      },
+      auth.dbProfileId,
+      auth.isGuest
+    );
+
+    if (data.envelopes) {
+      Object.entries(data.envelopes).forEach(([cat, lim]) => {
+        ledger.updateBudgetLimit(cat, lim, auth.dbProfileId, auth.isGuest);
+      });
+    }
+
+    if (data.initialGoal && data.initialGoal.target > 0) {
+      ledger.addSavingsGoal(
+        data.initialGoal.name,
+        data.initialGoal.target,
+        data.initialGoal.current || 0,
+        auth.dbProfileId,
+        auth.isGuest
+      );
+    }
+  };
+
+  const logout = () => {
+    auth.logout();
+  };
 
   const value: FinancialContextType = {
     // ledger slice
@@ -199,6 +224,7 @@ const FinancialBridge: React.FC<{ children: React.ReactNode }> = ({ children }) 
     deleteSavingsGoal,
     updateLoanExtraPayment: ledger.updateLoanExtraPayment,
     resetDemoData,
+    completeOnboarding,
     // auth slice
     currency: auth.currency,
     userType: auth.userType,
@@ -225,17 +251,6 @@ const FinancialBridge: React.FC<{ children: React.ReactNode }> = ({ children }) 
 // ─── FinancialProvider — composes sub-providers in the right order ────────────
 
 export const FinancialProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // LedgerProvider must be rendered first so AuthProvider can call seedLedger.
-  // We use a render-prop pattern via a wrapper component.
-  return (
-    <LedgerProviderWithSeed>
-      {children}
-    </LedgerProviderWithSeed>
-  );
-};
-
-/** Renders LedgerProvider, then AuthProvider that has access to seedLedger via closure. */
-const LedgerProviderWithSeed: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
     <LedgerProvider>
       <AuthBridge>
@@ -245,19 +260,16 @@ const LedgerProviderWithSeed: React.FC<{ children: React.ReactNode }> = ({ child
   );
 };
 
-/** Inside LedgerProvider so we can call useLedger().seedLedger as the onAuthSuccess callback. */
 const AuthBridge: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { seedLedger } = useLedger();
+  const { seedLedger, clearLedger } = useLedger();
   return (
-    <AuthProvider onAuthSuccess={seedLedger}>
+    <AuthProvider onAuthSuccess={seedLedger} onLogoutClear={clearLedger}>
       <FinancialBridge>
         {children}
       </FinancialBridge>
     </AuthProvider>
   );
 };
-
-// ─── Public hook — identical signature, zero consumer changes needed ──────────
 
 export const useFinancial = () => {
   const context = useContext(FinancialContext);
