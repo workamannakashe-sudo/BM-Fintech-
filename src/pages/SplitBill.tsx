@@ -16,7 +16,6 @@ import {
   Smartphone,
   Sparkles,
   Trash2,
-  Info,
 } from "lucide-react";
 import {
   calculateExactSplit,
@@ -24,6 +23,7 @@ import {
   generateWhatsAppLink,
   type Participant,
 } from "../utils/splitBill";
+import { ReceiptScannerModal } from "../components/ReceiptScannerModal";
 
 interface Friend {
   id: string;
@@ -62,9 +62,9 @@ export const SplitBill: React.FC = () => {
   const [payeeUpi, setPayeeUpi] = useState("rohan@okhdfcbank");
   const [showQrModal, setShowQrModal] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [receiptScannerOpen, setReceiptScannerOpen] = useState(false);
   const [newFriendName, setNewFriendName] = useState("");
   const [newFriendUpi, setNewFriendUpi] = useState("");
-  const [ocrBanner, setOcrBanner] = useState(false);
 
   const formatAmt = (val: number) => {
     if (currency === "INR") {
@@ -262,14 +262,14 @@ export const SplitBill: React.FC = () => {
           {/* Action Tools: Receipt OCR, WhatsApp Share, Copy Link */}
           <div className="grid grid-cols-3 gap-3 pt-1">
             <button
-              onClick={() => setOcrBanner(prev => !prev)}
+              onClick={() => setReceiptScannerOpen(true)}
               className="p-3 rounded-2xl bg-slate-50 dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-800 text-center transition-all cursor-pointer group"
             >
               <div className="w-8 h-8 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 flex items-center justify-center mx-auto mb-1 group-hover:scale-105 transition-transform">
                 <Upload className="w-4 h-4" />
               </div>
               <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">Scan Bill</span>
-              <span className="text-[10px] text-slate-400">OCR Extract</span>
+              <span className="text-[10px] text-slate-400">AI Vision OCR</span>
             </button>
 
             <button
@@ -303,14 +303,6 @@ export const SplitBill: React.FC = () => {
               <span className="text-[10px] text-emerald-600/70 dark:text-emerald-400/70">1-Tap Send</span>
             </button>
           </div>
-
-          {/* OCR Informational Banner */}
-          {ocrBanner && (
-            <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 text-xs text-blue-700 dark:text-blue-300 flex items-center gap-2">
-              <Info className="w-4 h-4 shrink-0" />
-              <span>AI Receipt OCR is integrated via Quick Log or upload directly in the Expenses view.</span>
-            </div>
-          )}
 
           {/* Inline Add Friend Form */}
           {showAddModal && (
@@ -555,6 +547,16 @@ export const SplitBill: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Gemini Vision Receipt Scanner Modal */}
+      <ReceiptScannerModal
+        isOpen={receiptScannerOpen}
+        onClose={() => setReceiptScannerOpen(false)}
+        onParsed={(data) => {
+          setBillTotal(String(data.total));
+          setEventName(data.merchant);
+        }}
+      />
 
     </div>
   );

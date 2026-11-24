@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from "react";
 import { useFinancial } from "../context/FinancialContext";
 import { generateMonthlyPDFReport } from "../services/pdfGenerator";
+import { forecastEndOfMonth } from "../services/anomalyForecast";
 import { SplitBillModal } from "../components/SplitBillModal";
+import { ReceiptScannerModal } from "../components/ReceiptScannerModal";
 import {
   Download,
   TrendingUp,
@@ -15,6 +17,7 @@ import {
   CreditCard,
   Users,
   Sliders,
+  Camera,
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
 
@@ -40,9 +43,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
   const [settlementView, setSettlementView] = useState<"weekly" | "daily">("weekly");
   const [logPeriod, setLogPeriod] = useState<"weekly" | "monthly">("monthly");
   const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
+  const [isReceiptScannerOpen, setIsReceiptScannerOpen] = useState(false);
   const [selectedReportModal, setSelectedReportModal] = useState<string | null>(null);
 
-  // Currency Formatter
   const formatAmt = (val: number) => {
     if (currency === "INR") {
       return `₹${Math.round(val).toLocaleString("en-IN")}`;
@@ -51,6 +54,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
   };
 
   const monthlyAllowance = profile.monthlyAllowance > 0 ? profile.monthlyAllowance : (currency === "INR" ? 38176 : 3817.6);
+
+  // Feature A: AI Month-End Trajectory Forecast
+  const spendForecast = useMemo(() => {
+    return forecastEndOfMonth(monthlyAllowance, transactions, new Date(), currency);
+  }, [monthlyAllowance, transactions, currency]);
 
   // Real-time Date format
   const currentDateFormatted = new Date().toLocaleDateString("en-US", {
@@ -195,6 +203,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
             <div className="flex items-center gap-1.5 sm:gap-2 mt-6 flex-wrap">
               {[
                 { id: "overview", label: "Overview", icon: Layers },
+                { id: "scan", label: "Scan Receipt", icon: Camera, action: () => setIsReceiptScannerOpen(true) },
                 { id: "balance", label: "Balance & Wallet", icon: CreditCard, action: () => setActiveTab("budget") },
                 { id: "split", label: "Split Bill", icon: Users, action: () => setIsSplitModalOpen(true) },
                 { id: "envelopes", label: "Envelopes", icon: Sliders, action: () => setActiveTab("budget") },
@@ -244,6 +253,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
               <span>Explore Schemes & Upgrade</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── AI/ML Spending Forecaster & Anomaly Banner (Feature A) ─── */}
+      <div className={`rounded-3xl border p-5 sm:p-6 transition-all shadow-md ${
+        spendForecast.trajectory === "critical"
+          ? "bg-rose-500/10 border-rose-500/30 text-rose-950 dark:text-rose-200"
+          : spendForecast.trajectory === "tight"
+          ? "bg-amber-500/10 border-amber-500/30 text-amber-950 dark:text-amber-200"
+          : "bg-emerald-500/10 border-emerald-500/30 text-emerald-950 dark:text-emerald-200"
+      }`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 text-white shadow-md ${
+              spendForecast.trajectory === "critical" ? "bg-rose-500" : spendForecast.trajectory === "tight" ? "bg-amber-500" : "bg-emerald-500"
+            }`}>
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-extrabold text-sm sm:text-base font-display">
+                  AI Month-End Spending Forecast
+                </h3>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-white/60 dark:bg-black/30 border border-current/20">
+                  {spendForecast.trajectory} trajectory
+                </span>
+              </div>
+              <p className="text-xs mt-1 font-medium leading-relaxed max-w-2xl opacity-90">
+                {spendForecast.recommendation}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 shrink-0 sm:border-l sm:border-current/20 sm:pl-4">
+            <div>
+              <span className="text-[10px] uppercase font-bold tracking-wider opacity-70 block">Daily Burn</span>
+              <span className="text-sm font-extrabold font-display">{currency === "INR" ? "₹" : "$"}{spendForecast.dailyBurnRate}/day</span>
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold tracking-wider opacity-70 block">Projected Spend</span>
+              <span className="text-sm font-extrabold font-display">{currency === "INR" ? "₹" : "$"}{spendForecast.projectedTotalSpend.toLocaleString()}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -696,6 +748,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
           </div>
         </div>
       )}
+
+      {/* Gemini Vision AI Receipt Scanner Modal */}
+      <ReceiptScannerModal
+        isOpen={isReceiptScannerOpen}
+        onClose={() => setIsReceiptScannerOpen(false)}
+      />
 
     </div>
   );

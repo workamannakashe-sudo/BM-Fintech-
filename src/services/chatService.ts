@@ -85,6 +85,9 @@ GUIDELINES:
 - When asked "Can I afford X?", calculate: Is price > remaining budget? Does it drop their daily allowance below a safe threshold? Conclude with an explicit YES, CAUTION, or NO, citing their remaining balance and days left.
 - When asked about scholarships or schemes, highlight relevant options for their state (${fc.profile.state || "India"}) and category (${fc.profile.category || "General"}) such as NSP, PMSS, AICTE Pragati, or State Freeships.
 - When asked about loans, explain EMI calculations simply and motivate them with accelerated prepayment benefits.
+- STRICT STUDENT SAFETY GUARDRAILS:
+  - Speculative Investment Prohibition: Refuse stock, options, forex, or cryptocurrency investment recommendations. If asked for stock or crypto tips, clearly state: "BudgetMitra is an educational budgeting companion, not a SEBI-registered investment advisor. I cannot recommend specific stocks, mutual funds, or cryptocurrency tokens."
+  - Financial Distress & Crisis Intervention: If the user indicates debt harassment, predatory loan app threats, severe distress, or self-harm keywords, compassionately provide crisis helpline information: National Mental Health Helpline Tele-MANAS (Dial 14416) and RBI Sachet Portal for illegal lending complaints (sachet.rbi.org.in).
 - Keep answers under 4-5 sentences unless a structured step-by-step breakdown is requested.
 - Language control:
   - If preferredLanguage is "hi", respond naturally in conversational Hindi (Devanagari script).
@@ -98,6 +101,30 @@ function generateHeuristicResponse(message: string, fc: FinancialContextPayload)
   const sym = fc.currency === "INR" ? "₹" : "$";
   const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
   const daysRemaining = Math.max(1, daysInMonth - new Date().getDate() + 1);
+
+  // Guardrail 1: Stock / Crypto speculative investment refusal
+  if (
+    text.includes("crypto") ||
+    text.includes("bitcoin") ||
+    text.includes("stock") ||
+    text.includes("option trading") ||
+    text.includes("buy share") ||
+    text.includes("trading tips")
+  ) {
+    return "BudgetMitra is an educational financial companion, not a SEBI-registered financial advisor. I cannot recommend specific stocks, cryptocurrency tokens, or trading speculation. I encourage building a solid emergency savings fund first!";
+  }
+
+  // Guardrail 2: Distress / Predatory loan harassment intervention
+  if (
+    text.includes("harass") ||
+    text.includes("threaten") ||
+    text.includes("loan app") ||
+    text.includes("can't repay") ||
+    text.includes("suicide") ||
+    text.includes("helpline")
+  ) {
+    return "If you are facing harassment from lending apps or feeling overwhelmed, please know support is immediately available: Call Tele-MANAS at 14416 for 24/7 free counseling. For unauthorized lending app harassment, file a complaint on the RBI Sachet Portal (sachet.rbi.org.in) and cybercrime.gov.in. You are not alone.";
+  }
   const safeDaily = (fc.remainingBudget / daysRemaining).toFixed(0);
 
   // 1. Affordability check

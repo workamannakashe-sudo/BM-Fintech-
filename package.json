@@ -9,6 +9,7 @@
     "lint": "oxlint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "verify": "oxlint && tsc -b && vitest run && vite build",
     "preview": "vite preview",
     "e2e": "npx.cmd playwright test",
     "e2e:ui": "npx.cmd playwright test --ui"

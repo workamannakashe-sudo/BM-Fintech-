@@ -3,6 +3,7 @@ import React, { useState, useRef, useMemo } from "react";
 import { useFinancial } from "../context/FinancialContext";
 import type { Transaction } from "../context/FinancialContext";
 import { parseBankCSV } from "../services/csvParser";
+import { ReceiptScannerModal } from "../components/ReceiptScannerModal";
 import {
   Trash2,
   AlertTriangle,
@@ -15,7 +16,8 @@ import {
   Coffee,
   Utensils,
   Bus,
-  BookOpen
+  BookOpen,
+  Camera,
 } from "lucide-react";
 
 export const Expenses: React.FC = () => {
@@ -41,6 +43,9 @@ export const Expenses: React.FC = () => {
 
   // Filtering states
   const [filterCategory, setFilterCategory] = useState("All");
+
+  // AI Vision Receipt Scanner modal state
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   // Anomaly detail overlay modal state
   const [selectedAnomaly, setSelectedAnomaly] = useState<Transaction | null>(null);
@@ -158,14 +163,25 @@ export const Expenses: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      {/* Title */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-display">
-          Expenses Tracker
-        </h1>
-        <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 mt-1">
-          Upload bank statement CSV files or log manual card purchases with automatic AI categorization.
-        </p>
+      {/* Title with AI Receipt Scanner Action */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-display">
+            Expenses Tracker
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 mt-1">
+            Upload bank statement CSV files or photograph physical receipts with Gemini Vision AI.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setScannerOpen(true)}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-bold text-xs shadow-md shadow-emerald-500/20 active:scale-95 transition-all cursor-pointer shrink-0 self-start sm:self-auto"
+        >
+          <Camera className="w-4 h-4" />
+          <span>Scan Receipt (AI Vision)</span>
+        </button>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -481,6 +497,12 @@ export const Expenses: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Gemini Vision Receipt Scanner Modal */}
+      <ReceiptScannerModal
+        isOpen={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+      />
     </div>
   );
 };
