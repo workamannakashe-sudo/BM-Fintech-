@@ -68,4 +68,18 @@ describe("Dashboard Page", () => {
     const reportElements = screen.queryAllByText(/report/i);
     expect(reportElements.length).toBeGreaterThan(0);
   });
+
+  it("does not leak hardcoded mock strings (147k, 31,200, 56,800, 1,679) for authenticated users", () => {
+    render(
+      <Wrapper>
+        <Dashboard setActiveTab={noop} onOpenQuickLog={noop} />
+      </Wrapper>
+    );
+    const text = document.body.textContent || "";
+    expect(text).not.toContain("147k");
+    expect(text).not.toContain("+53,002 vs last period");
+    expect(text).not.toContain("1,679");
+    expect(text).not.toContain("₹31,200");
+    expect(text).not.toContain("₹56,800");
+  });
 });

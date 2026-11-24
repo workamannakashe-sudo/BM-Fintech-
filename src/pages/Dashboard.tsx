@@ -31,10 +31,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
     profile,
     transactions,
     goals,
+    budgets,
     currency,
     healthScore,
     healthGrade,
     totalSpentThisMonth,
+    isGuest,
   } = useFinancial();
 
   // Active top sub-nav pill filter
@@ -45,6 +47,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
   const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
   const [isReceiptScannerOpen, setIsReceiptScannerOpen] = useState(false);
   const [selectedReportModal, setSelectedReportModal] = useState<string | null>(null);
+  const [envelopeSearch, setEnvelopeSearch] = useState("");
 
   const formatAmt = (val: number) => {
     if (currency === "INR") {
@@ -53,7 +56,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
     return `$${val.toFixed(2)}`;
   };
 
-  const monthlyAllowance = profile.monthlyAllowance > 0 ? profile.monthlyAllowance : (currency === "INR" ? 38176 : 3817.6);
+  const monthlyAllowance = profile.monthlyAllowance > 0
+    ? profile.monthlyAllowance
+    : isGuest
+    ? (currency === "INR" ? 15000 : 1500)
+    : 0;
 
   // Feature A: AI Month-End Trajectory Forecast
   const spendForecast = useMemo(() => {
@@ -91,9 +98,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
       }
     });
 
-    // If no real data yet, return representative seed values so chart is never blank
     const total = Object.values(buckets).reduce((s, b) => s + b.Successful, 0);
-    if (total === 0) {
+    // If no data and running in Guest/Demo mode, show realistic sample preview
+    if (total === 0 && isGuest) {
       return [
         { day: "Mon", Successful: 6200, Payouts: 850 },
         { day: "Tue", Successful: 8261, Payouts: 1098 },
@@ -105,33 +112,194 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
       ];
     }
 
-    // Return in Mon–Sun order (visually nicer than Sun-first)
+    // Return in Mon–Sun order
     return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => buckets[d]);
-  }, [transactions]);
+  }, [transactions, isGuest]);
 
-
-  // Envelopes Gross Volume metrics
-  const envelopeItems = [
-    { name: "Home Rent / Dorm", amount: currency === "INR" ? 15000 : 1500, color: "from-amber-400 to-orange-500", pct: 75 },
-    { name: "Grocery & Dining", amount: currency === "INR" ? 8260.09 : 826.09, color: "from-teal-400 to-emerald-500", pct: 45 },
-    { name: "Subscriptions & Tech", amount: currency === "INR" ? 2400 : 240, color: "from-blue-400 to-cyan-500", pct: 30 },
-    { name: "Online Shopping", amount: currency === "INR" ? 3560 : 356, color: "from-purple-400 to-pink-500", pct: 20 },
+  // Envelopes Gross Volume metrics — calculated live from user budgets & transactions
+  const envelopeColors = [
+    "from-amber-400 to-orange-500",
+    "from-teal-400 to-emerald-500",
+    "from-blue-400 to-cyan-500",
+    "from-purple-400 to-pink-500",
+    "from-rose-400 to-red-500",
   ];
 
-  // Soundwave settlement chart data
-  const settlementSoundwave = useMemo(() => [
-    { time: "09:00", val: 40, height: "40%" },
-    { time: "10:00", val: 65, height: "65%" },
-    { time: "11:00", val: 95, height: "95%" },
-    { time: "12:00", val: 70, height: "70%" },
-    { time: "13:00", val: 85, height: "85%" },
-    { time: "14:00", val: 50, height: "50%" },
-    { time: "15:00", val: 90, height: "90%" },
-    { time: "16:00", val: 60, height: "60%" },
-    { time: "17:00", val: 75, height: "75%" },
-    { time: "18:00", val: 45, height: "45%" },
-    { time: "19:00", val: 80, height: "80%" },
-  ], []);
+  const envelopeItems = useMemo(() => {
+    const budgetEntries = Object.entries(budgets || {});
+    if (budgetEntries.length > 0) {
+      return budgetEntries
+        .filter(([cat]) => !envelopeSearch || cat.toLowerCase().includes(envelopeSearch.toLowerCase()))
+        .map(([cat, limit], idx) => {
+          const spent = transactions
+            .filter((t) => t.category.toLowerCase() === cat.toLowerCase())
+            .reduce((sum, t) => sum + t.amount, 0);
+          const pct = limit > 0 ? Math.min(100, Math.round((spent / limit) * 100)) : 0;
+          return {
+            name: cat,
+            amount: limit,
+            spent,
+            color: envelopeColors[idx % envelopeColors.length],
+            pct,
+          };
+        });
+    }
+
+    // In demo mode with no budgets defined yet
+    if (isGuest) {
+      const demoEnvelopes = [
+        { name: "Home Rent / Dorm", amount: currency === "INR" ? 6000 : 600, spent: currency === "INR" ? 4500 : 450, color: envelopeColors[0], pct: 75 },
+        { name: "Grocery & Dining", amount: currency === "INR" ? 3500 : 350, spent: currency === "INR" ? 1575 : 157.5, color: envelopeColors[1], pct: 45 },
+        { name: "Subscriptions & Tech", amount: currency === "INR" ? 1200 : 120, spent: currency === "INR" ? 360 : 36, color: envelopeColors[2], pct: 30 },
+        { name: "Online Shopping", amount: currency === "INR" ? 2000 : 200, spent: currency === "INR" ? 400 : 40, color: envelopeColors[3], pct: 20 },
+      ];
+      return demoEnvelopes.filter((e) => !envelopeSearch || e.name.toLowerCase().includes(envelopeSearch.toLowerCase()));
+    }
+
+    return [];
+  }, [budgets, transactions, isGuest, currency, envelopeSearch]);
+
+  // Dynamic Transaction Velocity KPI (Card 1)
+  const txnMetrics = useMemo(() => {
+    if (isGuest && transactions.length === 0) {
+      return {
+        volumeText: currency === "INR" ? "₹14.7k" : "$1.47k",
+        highestBadge: "Highest: Wed",
+        trendText: "+₹3,002 vs last period",
+      };
+    }
+    const count = transactions.length;
+    if (count === 0) {
+      return {
+        volumeText: formatAmt(0),
+        highestBadge: "0 txns",
+        trendText: "No transactions recorded yet",
+      };
+    }
+    const daysShort = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dayTotals: Record<string, number> = { Sun: 0, Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0 };
+    transactions.forEach((t) => {
+      try {
+        const d = new Date(t.date);
+        if (!isNaN(d.getTime())) {
+          dayTotals[daysShort[d.getDay()]] += t.amount;
+        }
+      } catch {}
+    });
+    let maxDay = "";
+    let maxAmount = 0;
+    Object.entries(dayTotals).forEach(([day, amt]) => {
+      if (amt > maxAmount) {
+        maxAmount = amt;
+        maxDay = day;
+      }
+    });
+
+    const totalVol = transactions.reduce((s, t) => s + t.amount, 0);
+    return {
+      volumeText: formatAmt(totalVol),
+      highestBadge: maxAmount > 0 ? `Highest: ${maxDay}` : `${count} total`,
+      trendText: `${count} recorded transactions`,
+    };
+  }, [isGuest, transactions, currency]);
+
+  // Dynamic Peer Network KPI (Card 2)
+  const peerMetrics = useMemo(() => {
+    const splitTxns = transactions.filter(
+      (t) =>
+        t.category.toLowerCase().includes("split") ||
+        t.description.toLowerCase().includes("split") ||
+        t.category.toLowerCase().includes("dining") ||
+        t.category.toLowerCase().includes("food")
+    );
+    if (isGuest && transactions.length === 0) {
+      return {
+        countText: "12 splits",
+        badge: "Demo Network",
+        subtext: "Campus roommate split active",
+      };
+    }
+    if (splitTxns.length === 0) {
+      return {
+        countText: "0 splits",
+        badge: "Ready",
+        subtext: "No active splits with peers yet",
+      };
+    }
+    const splitVolume = splitTxns.reduce((s, t) => s + t.amount, 0);
+    return {
+      countText: `${splitTxns.length} splits`,
+      badge: `${formatAmt(splitVolume)} shared`,
+      subtext: `Split across ${splitTxns.length} campus expenses`,
+    };
+  }, [isGuest, transactions, currency]);
+
+  // Dynamic Settlement & Cashflow Metrics (Row 3)
+  const cashflowMetrics = useMemo(() => {
+    if (isGuest && transactions.length === 0) {
+      return {
+        balance: formatAmt(currency === "INR" ? 10450 : 1045),
+        yesterdayOrCleared: formatAmt(currency === "INR" ? 1250 : 125),
+        pending: formatAmt(currency === "INR" ? 850 : 85),
+        processing: formatAmt(currency === "INR" ? 1250 : 125),
+      };
+    }
+
+    const todayStr = new Date().toISOString().split("T")[0];
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split("T")[0];
+
+    let todaySpent = 0;
+    let yesterdaySpent = 0;
+    let anomalyPending = 0;
+
+    transactions.forEach((t) => {
+      if (t.date === todayStr) todaySpent += t.amount;
+      else if (t.date === yesterdayStr) yesterdaySpent += t.amount;
+      if (t.isAnomaly) anomalyPending += t.amount;
+    });
+
+    const liveBalance = Math.max(0, monthlyAllowance - totalSpentThisMonth);
+
+    return {
+      balance: formatAmt(liveBalance),
+      yesterdayOrCleared: formatAmt(yesterdaySpent),
+      pending: formatAmt(anomalyPending),
+      processing: formatAmt(todaySpent),
+    };
+  }, [isGuest, transactions, monthlyAllowance, totalSpentThisMonth, currency]);
+
+  // Soundwave settlement chart data — derived from live transaction heights or clean baseline
+  const settlementSoundwave = useMemo(() => {
+    const hours = ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00"];
+    if (isGuest && transactions.length === 0) {
+      return [
+        { time: "09:00", height: "40%" },
+        { time: "10:00", height: "65%" },
+        { time: "11:00", height: "95%" },
+        { time: "12:00", height: "70%" },
+        { time: "13:00", height: "85%" },
+        { time: "14:00", height: "50%" },
+        { time: "15:00", height: "90%" },
+        { time: "16:00", height: "60%" },
+        { time: "17:00", height: "75%" },
+        { time: "18:00", height: "45%" },
+        { time: "19:00", height: "80%" },
+      ];
+    }
+
+    if (transactions.length === 0) {
+      return hours.map((time) => ({ time, height: "12%" }));
+    }
+
+    const maxTxnAmt = Math.max(...transactions.map((t) => t.amount), 1);
+    return hours.map((time, idx) => {
+      const txn = transactions[idx % transactions.length];
+      const pct = Math.min(100, Math.max(15, Math.round((txn.amount / maxTxnAmt) * 100)));
+      return { time, height: `${pct}%` };
+    });
+  }, [isGuest, transactions]);
 
   // Structured Transaction Log (from user data + mock enriched)
   const transactionRows = useMemo(() => {
@@ -328,7 +496,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
                 </span>
               </div>
               <span className="px-2.5 py-1 rounded-full bg-purple-50 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 text-[10px] font-bold">
-                0.6% transactions | today
+                {transactions.length > 0 ? `${transactions.length} recorded | ${healthGrade} health` : "No spend recorded"}
               </span>
             </div>
 
@@ -392,6 +560,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
             <div className="relative mb-5">
               <input
                 type="text"
+                value={envelopeSearch}
+                onChange={(e) => setEnvelopeSearch(e.target.value)}
                 placeholder="Search envelope..."
                 className="w-full h-8 pl-3 pr-8 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-xs text-slate-900 dark:text-white outline-none"
               />
@@ -400,23 +570,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
 
             {/* Envelopes list with dot meters */}
             <div className="space-y-4">
-              {envelopeItems.map((env, idx) => (
-                <div key={idx} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-semibold text-slate-700 dark:text-zinc-300">{env.name}</span>
-                    <span className="font-extrabold text-slate-900 dark:text-white font-display">
-                      {formatAmt(env.amount)}
-                    </span>
-                  </div>
-                  {/* Segmented dot track */}
-                  <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
-                    <div
-                      style={{ width: `${env.pct}%` }}
-                      className={`h-full rounded-full bg-gradient-to-r ${env.color}`}
-                    />
-                  </div>
+              {envelopeItems.length === 0 ? (
+                <div className="py-8 text-center">
+                  <p className="text-xs font-semibold text-slate-600 dark:text-zinc-400">
+                    No budget envelopes set
+                  </p>
+                  <p className="text-[11px] text-slate-400 dark:text-zinc-500 mt-1">
+                    Set category limits to track student spending caps
+                  </p>
+                  <button
+                    onClick={() => setActiveTab("budget")}
+                    className="mt-3 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 transition-colors cursor-pointer"
+                  >
+                    + Configure Envelopes
+                  </button>
                 </div>
-              ))}
+              ) : (
+                envelopeItems.map((env, idx) => (
+                  <div key={idx} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-700 dark:text-zinc-300">{env.name}</span>
+                      <span className="font-extrabold text-slate-900 dark:text-white font-display">
+                        {formatAmt(env.amount)}
+                      </span>
+                    </div>
+                    {/* Segmented dot track */}
+                    <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+                      <div
+                        style={{ width: `${env.pct}%` }}
+                        className={`h-full rounded-full bg-gradient-to-r ${env.color}`}
+                      />
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
@@ -443,15 +630,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
             </div>
             <div className="flex items-baseline justify-between">
               <span className="text-2xl font-extrabold text-slate-900 dark:text-white font-display">
-                147k
+                {txnMetrics.volumeText}
               </span>
               <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full">
-                Highest: Wed
+                {txnMetrics.highestBadge}
               </span>
             </div>
             <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400 mt-2">
               <TrendingUp className="w-3 h-3 text-emerald-500" />
-              <span>+53,002 vs last period</span>
+              <span>{txnMetrics.trendText}</span>
             </div>
           </div>
 
@@ -465,15 +652,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
             </div>
             <div className="flex items-baseline justify-between">
               <span className="text-2xl font-extrabold text-slate-900 dark:text-white font-display">
-                1,679
+                {peerMetrics.countText}
               </span>
               <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60 px-2 py-0.5 rounded-full">
-                Peak: Fri
+                {peerMetrics.badge}
               </span>
             </div>
             <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400 mt-2">
               <Users className="w-3 h-3 text-purple-500" />
-              <span>+435 new campus splits</span>
+              <span>{peerMetrics.subtext}</span>
             </div>
           </div>
 
@@ -527,7 +714,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
                 Today Balance
               </span>
               <span className="text-3xl font-extrabold text-slate-900 dark:text-white font-display">
-                {formatAmt(currency === "INR" ? 31200 : 312.00)}
+                {cashflowMetrics.balance}
               </span>
             </div>
 
@@ -536,7 +723,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
                 Yesterday Settlement
               </span>
               <span className="text-2xl font-bold text-slate-500 dark:text-zinc-400 font-display">
-                {formatAmt(currency === "INR" ? 56800 : 568.00)}
+                {cashflowMetrics.yesterdayOrCleared}
               </span>
             </div>
           </div>
@@ -560,7 +747,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
               <div>
                 <span className="text-[10px] font-bold text-slate-400 block">Pending</span>
                 <span className="text-xs font-bold text-slate-900 dark:text-white">
-                  {formatAmt(currency === "INR" ? 31200 : 312)}
+                  {cashflowMetrics.pending}
                 </span>
               </div>
               <button
@@ -575,7 +762,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
               <div>
                 <span className="text-[10px] font-bold text-slate-400 block">Processing</span>
                 <span className="text-xs font-bold text-slate-900 dark:text-white">
-                  {formatAmt(currency === "INR" ? 56800 : 568)}
+                  {cashflowMetrics.processing}
                 </span>
               </div>
               <button
@@ -730,6 +917,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
               All transactions for this period have been verified and matched with your bank feed.
             </p>
             <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Amount</span>
+                <span className="font-bold text-slate-900 dark:text-white">
+                  {selectedReportModal === "Pending Settlement" ? cashflowMetrics.pending : cashflowMetrics.processing}
+                </span>
+              </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Status</span>
                 <span className="font-bold text-emerald-600">Active Pipeline</span>
