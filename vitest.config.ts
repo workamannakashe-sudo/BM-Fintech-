@@ -10,6 +10,7 @@ export default defineConfig({
     setupFiles: [],
     // Exclude Playwright E2E tests — they run via `npm run e2e`
     exclude: ["e2e/**", "node_modules/**"],
+    fileParallelism: false,
   },
 });
 

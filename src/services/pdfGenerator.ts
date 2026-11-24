@@ -15,6 +15,22 @@ export interface PDFReportData {
   savingsGoalProgress: Array<{ name: string; target: number; current: number }>;
   categoryBreakdown: Record<string, number>;
   transactions: Array<{ date: string; description: string; amount: number; category: string }>;
+  currency?: string;
+}
+
+/**
+ * Formats a monetary number with appropriate standard ASCII currency notation
+ * (avoids unrendered custom UTF-8 glyphs in basic PDF Helvetica font).
+ */
+function formatPdfCurrency(amount: number, currency: string = "INR"): string {
+  const safeAmt = isNaN(amount) ? 0 : amount;
+  if (currency === "INR") {
+    return `Rs. ${safeAmt.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  if (currency === "USD") {
+    return `$${safeAmt.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  return `${currency} ${safeAmt.toFixed(2)}`;
 }
 
 /**
@@ -89,12 +105,14 @@ export function generateMonthlyPDFReport(data: PDFReportData): void {
     ? Math.round((data.totalSpent / data.totalBudget) * 100) 
     : 0;
 
+  const curr = data.currency || "INR";
+
   const summaryHeaders = [["Metric", "Value", "Status / Trajectory"]];
   const summaryBody = [
-    ["Monthly Income / Allowance", `$${data.monthlyIncome.toFixed(2)}`, "Primary cash inflow"],
-    ["Total Expenses Logged", `$${data.totalSpent.toFixed(2)}`, `${data.totalSpent > data.totalBudget ? "⚠️ Exceeded Budget" : "✅ Under Budget"}`],
-    ["Total Allocated Budget", `$${data.totalBudget.toFixed(2)}`, `Adherence: ${budgetAdherence}%`],
-    ["Net Cash Flow (Savings)", `$${(data.monthlyIncome - data.totalSpent).toFixed(2)}`, `${data.monthlyIncome >= data.totalSpent ? "Positive Surplus" : "Deficit (Warning)"}`],
+    ["Monthly Income / Allowance", formatPdfCurrency(data.monthlyIncome, curr), "Primary cash inflow"],
+    ["Total Expenses Logged", formatPdfCurrency(data.totalSpent, curr), `${data.totalSpent > data.totalBudget ? "⚠️ Exceeded Budget" : "✅ Under Budget"}`],
+    ["Total Allocated Budget", formatPdfCurrency(data.totalBudget, curr), `Adherence: ${budgetAdherence}%`],
+    ["Net Cash Flow (Savings)", formatPdfCurrency(data.monthlyIncome - data.totalSpent, curr), `${data.monthlyIncome >= data.totalSpent ? "Positive Surplus" : "Deficit (Warning)"}`],
   ];
 
   autoTable(doc, {
@@ -116,11 +134,11 @@ export function generateMonthlyPDFReport(data: PDFReportData): void {
   const categoryHeaders = [["Category", "Total Spent", "Percentage of Spend"]];
   const categoryBody = Object.entries(data.categoryBreakdown).map(([cat, amount]) => {
     const percentage = data.totalSpent > 0 ? Math.round((amount / data.totalSpent) * 100) : 0;
-    return [cat, `$${amount.toFixed(2)}`, `${percentage}%`];
+    return [cat, formatPdfCurrency(amount, curr), `${percentage}%`];
   });
 
   if (categoryBody.length === 0) {
-    categoryBody.push(["No expenses logged", "$0.00", "0%"]);
+    categoryBody.push(["No expenses logged", formatPdfCurrency(0, curr), "0%"]);
   }
 
   autoTable(doc, {
@@ -142,11 +160,11 @@ export function generateMonthlyPDFReport(data: PDFReportData): void {
   const goalHeaders = [["Goal Title", "Target Amount", "Current Savings", "Progress (%)"]];
   const goalBody = data.savingsGoalProgress.map((g) => {
     const pct = g.target > 0 ? Math.round((g.current / g.target) * 100) : 0;
-    return [g.name, `$${g.target.toFixed(2)}`, `$${g.current.toFixed(2)}`, `${pct}%`];
+    return [g.name, formatPdfCurrency(g.target, curr), formatPdfCurrency(g.current, curr), `${pct}%`];
   });
 
   if (goalBody.length === 0) {
-    goalBody.push(["No goals configured", "$0.00", "$0.00", "0%"]);
+    goalBody.push(["No goals configured", formatPdfCurrency(0, curr), formatPdfCurrency(0, curr), "0%"]);
   }
 
   autoTable(doc, {
@@ -176,11 +194,11 @@ export function generateMonthlyPDFReport(data: PDFReportData): void {
     t.date,
     t.description,
     t.category,
-    `$${t.amount.toFixed(2)}`,
+    formatPdfCurrency(t.amount, curr),
   ]);
 
   if (txBody.length === 0) {
-    txBody.push(["-", "No transactions found", "-", "$0.00"]);
+    txBody.push(["-", "No transactions found", "-", formatPdfCurrency(0, curr)]);
   }
 
   autoTable(doc, {

@@ -15,7 +15,15 @@ import {
   QrCode,
   Smartphone,
   Sparkles,
+  Trash2,
+  Info,
 } from "lucide-react";
+import {
+  calculateExactSplit,
+  generateUpiLink,
+  generateWhatsAppLink,
+  type Participant,
+} from "../utils/splitBill";
 
 interface Friend {
   id: string;
@@ -49,9 +57,14 @@ export const SplitBill: React.FC = () => {
   const [eventName, setEventName] = useState("Hostel Biryani & Chai Night");
   const [friends, setFriends] = useState<Friend[]>(INITIAL_FRIENDS);
   const [copied, setCopied] = useState(false);
+  const [copiedUpi, setCopiedUpi] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [payeeUpi, setPayeeUpi] = useState("rohan@okhdfcbank");
   const [showQrModal, setShowQrModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newFriendName, setNewFriendName] = useState("");
+  const [newFriendUpi, setNewFriendUpi] = useState("");
+  const [ocrBanner, setOcrBanner] = useState(false);
 
   const formatAmt = (val: number) => {
     if (currency === "INR") {
@@ -61,15 +74,27 @@ export const SplitBill: React.FC = () => {
   };
 
   const selectedFriends = friends.filter(f => f.selected);
-  const totalPeople = selectedFriends.length + 1; // user + selected friends
   const parsedTotal = parseFloat(billTotal) || 0;
-  const equalPortion = parsedTotal > 0 ? parsedTotal / totalPeople : 0;
 
-  const upiPayUri = `upi://pay?pa=${encodeURIComponent(payeeUpi)}&pn=${encodeURIComponent(
-    eventName
-  )}&am=${Math.round(equalPortion)}&cu=INR&tn=${encodeURIComponent(
-    `BudgetMitra: ${eventName}`
-  )}`;
+  // Exact Zero-Loss Split Algorithm
+  const participants: Participant[] = [
+    { id: "me", name: "You (Payer)", isPayer: true, selected: true },
+    ...friends.map(f => ({ id: f.id, name: f.name, selected: f.selected, upiId: f.upiId }))
+  ];
+
+  const splitResults = calculateExactSplit(parsedTotal, participants);
+  const userShareResult = splitResults.find(r => r.participantId === "me");
+  const userShare = userShareResult ? userShareResult.amount : 0;
+  const friendShareResult = splitResults.find(r => r.participantId !== "me");
+  const equalPortion = friendShareResult ? friendShareResult.amount : 0;
+  const totalPeople = splitResults.length;
+
+  const upiPayUri = generateUpiLink({
+    payeeUpi: payeeUpi,
+    payeeName: eventName,
+    amount: equalPortion,
+    transactionNote: `BudgetMitra: ${eventName}`,
+  });
 
   const upiQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(
     upiPayUri
@@ -79,6 +104,28 @@ export const SplitBill: React.FC = () => {
     setFriends(prev =>
       prev.map(f => (f.id === id ? { ...f, selected: !f.selected } : f))
     );
+  };
+
+  const removeFriend = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFriends(prev => prev.filter(f => f.id !== id));
+  };
+
+  const handleAddFriend = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFriendName.trim()) return;
+    const newFriend: Friend = {
+      id: `f_${Date.now()}`,
+      name: newFriendName.trim(),
+      avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80",
+      selected: true,
+      amountOwed: 0,
+      upiId: newFriendUpi.trim() || `${newFriendName.toLowerCase().replace(/\s+/g, "")}@upi`,
+    };
+    setFriends(prev => [...prev, newFriend]);
+    setNewFriendName("");
+    setNewFriendUpi("");
+    setShowAddModal(false);
   };
 
   const handleApplyPreset = (p: typeof PRESET_ACTIVITIES[0]) => {
@@ -91,7 +138,7 @@ export const SplitBill: React.FC = () => {
     try {
       await addTransaction(
         `${eventName} (My Share)`,
-        equalPortion,
+        userShare,
         new Date().toISOString().split("T")[0],
         "Food & Dining"
       );
@@ -104,7 +151,7 @@ export const SplitBill: React.FC = () => {
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(
-      `BudgetMitra Split Request for ${eventName}: ${formatAmt(equalPortion)} per person.`
+      `BudgetMitra Split Request for ${eventName}: ${formatAmt(equalPortion)} per person.\nPay via UPI: ${upiPayUri}`
     );
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -215,7 +262,7 @@ export const SplitBill: React.FC = () => {
           {/* Action Tools: Receipt OCR, WhatsApp Share, Copy Link */}
           <div className="grid grid-cols-3 gap-3 pt-1">
             <button
-              onClick={() => alert("Receipt OCR initialized: Upload bill photo to auto-extract items!")}
+              onClick={() => setOcrBanner(prev => !prev)}
               className="p-3 rounded-2xl bg-slate-50 dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-800 text-center transition-all cursor-pointer group"
             >
               <div className="w-8 h-8 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 flex items-center justify-center mx-auto mb-1 group-hover:scale-105 transition-transform">
@@ -240,11 +287,11 @@ export const SplitBill: React.FC = () => {
 
             <button
               onClick={() => {
-                const url = `https://wa.me/?text=${encodeURIComponent(
+                const url = generateWhatsAppLink(
                   `Hey! Please pay your share for *${eventName}*: ${formatAmt(
                     equalPortion
                   )} via UPI to ${payeeUpi}.\nPay Link: ${upiPayUri}`
-                )}`;
+                );
                 window.open(url, "_blank");
               }}
               className="p-3 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-center transition-all cursor-pointer group"
@@ -257,6 +304,52 @@ export const SplitBill: React.FC = () => {
             </button>
           </div>
 
+          {/* OCR Informational Banner */}
+          {ocrBanner && (
+            <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 text-xs text-blue-700 dark:text-blue-300 flex items-center gap-2">
+              <Info className="w-4 h-4 shrink-0" />
+              <span>AI Receipt OCR is integrated via Quick Log or upload directly in the Expenses view.</span>
+            </div>
+          )}
+
+          {/* Inline Add Friend Form */}
+          {showAddModal && (
+            <form onSubmit={handleAddFriend} className="p-3 rounded-2xl bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Friend's Full Name"
+                  value={newFriendName}
+                  onChange={(e) => setNewFriendName(e.target.value)}
+                  className="flex-1 px-3 py-1.5 rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs font-semibold text-slate-900 dark:text-white outline-none"
+                  autoFocus
+                />
+                <input
+                  type="text"
+                  placeholder="UPI ID (optional)"
+                  value={newFriendUpi}
+                  onChange={(e) => setNewFriendUpi(e.target.value)}
+                  className="flex-1 px-3 py-1.5 rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs font-semibold text-slate-900 dark:text-white outline-none"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-3 py-1 text-xs text-slate-400 hover:text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold"
+                >
+                  Save Friend
+                </button>
+              </div>
+            </form>
+          )}
+
           {/* Friend Multi-Select Grid */}
           <div>
             <div className="flex items-center justify-between mb-3">
@@ -264,22 +357,7 @@ export const SplitBill: React.FC = () => {
                 Select Friends Sharing this Bill ({selectedFriends.length} selected)
               </span>
               <button
-                onClick={() => {
-                  const name = prompt("Friend's name:");
-                  if (name) {
-                    setFriends(prev => [
-                      ...prev,
-                      {
-                        id: `f_${Date.now()}`,
-                        name,
-                        avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80",
-                        selected: true,
-                        amountOwed: 0,
-                        upiId: `${name.toLowerCase().replace(/\s+/g, "")}@upi`,
-                      },
-                    ]);
-                  }
-                }}
+                onClick={() => setShowAddModal(prev => !prev)}
                 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5 stroke-[3]" /> Add Friend
@@ -291,12 +369,21 @@ export const SplitBill: React.FC = () => {
                 <div
                   key={f.id}
                   onClick={() => toggleFriend(f.id)}
-                  className={`p-3 rounded-2xl border flex items-center gap-3 transition-all cursor-pointer select-none ${
+                  className={`relative group/fcard p-3 rounded-2xl border flex items-center gap-3 transition-all cursor-pointer select-none ${
                     f.selected
                       ? "border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30"
                       : "border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/40 opacity-60"
                   }`}
                 >
+                  <button
+                    type="button"
+                    onClick={(e) => removeFriend(f.id, e)}
+                    title={`Remove ${f.name}`}
+                    className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center opacity-0 group-hover/fcard:opacity-100 transition-opacity hover:bg-rose-600 z-10"
+                  >
+                    <Trash2 className="w-2.5 h-2.5" />
+                  </button>
+
                   <div className="relative w-10 h-10 rounded-full overflow-hidden shrink-0 border border-white dark:border-zinc-800">
                     <img src={f.avatar} alt={f.name} className="w-full h-full object-cover" />
                     {f.selected && (
@@ -409,7 +496,7 @@ export const SplitBill: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <span>Record & Split In ({formatAmt(equalPortion)})</span>
+                  <span>Record & Split In ({formatAmt(userShare)})</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -457,11 +544,12 @@ export const SplitBill: React.FC = () => {
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(payeeUpi);
-                  alert("UPI ID copied!");
+                  setCopiedUpi(true);
+                  setTimeout(() => setCopiedUpi(false), 2000);
                 }}
                 className="py-2.5 px-3 rounded-xl border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 text-xs font-bold hover:bg-slate-50 dark:hover:bg-zinc-800"
               >
-                Copy UPI ID
+                {copiedUpi ? "Copied!" : "Copy UPI ID"}
               </button>
             </div>
           </div>

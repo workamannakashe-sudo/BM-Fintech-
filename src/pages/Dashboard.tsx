@@ -147,10 +147,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
       categoryTotals[t.category] = (categoryTotals[t.category] || 0) + t.amount;
     });
 
+    const currentMonthYear = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
     generateMonthlyPDFReport({
       studentName: profile.name || "Student",
       studentMajor: profile.major || "B.Tech",
-      monthYear: "March 2026",
+      monthYear: currentMonthYear,
       healthScore,
       healthGrade,
       monthlyIncome: monthlyAllowance,
@@ -159,6 +161,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onOpenQuickL
       remainingBudget: Math.max(0, monthlyAllowance - totalSpentThisMonth),
       savingsGoalProgress: goals.map((g) => ({ name: g.name, target: g.target, current: g.current })),
       categoryBreakdown: categoryTotals,
+      currency: currency || "INR",
       transactions: transactions.map((t) => ({
         date: t.date,
         description: t.description,

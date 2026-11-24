@@ -9,9 +9,12 @@ import {
   Users,
   Copy,
   ArrowRight,
-  Upload
+  Upload,
+  Trash2,
+  Info
 } from "lucide-react";
 import { motion } from "motion/react";
+import { calculateExactSplit, generateWhatsAppLink, type Participant } from "../utils/splitBill";
 
 interface SplitBillModalProps {
   isOpen: boolean;
@@ -46,6 +49,9 @@ export const SplitBillModal: React.FC<SplitBillModalProps> = ({ isOpen, onClose 
   const [isProcessing, setIsProcessing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [splitSuccess, setSplitSuccess] = useState(false);
+  const [newFriendName, setNewFriendName] = useState("");
+  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [ocrNotice, setOcrNotice] = useState(false);
 
   if (!isOpen) return null;
 
@@ -55,12 +61,39 @@ export const SplitBillModal: React.FC<SplitBillModalProps> = ({ isOpen, onClose 
     );
   };
 
-  const selectedFriends = friends.filter(f => f.selected);
-  const totalCount = selectedFriends.length + 1; // including user
+  const removeFriend = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFriends(prev => prev.filter(f => f.id !== id));
+  };
 
+  const handleAddFriendSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFriendName.trim()) return;
+    const newFriend: Friend = {
+      id: `f_${Date.now()}`,
+      name: newFriendName.trim(),
+      avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80",
+      selected: true,
+    };
+    setFriends(prev => [...prev, newFriend]);
+    setNewFriendName("");
+    setShowAddFriend(false);
+  };
+
+  const selectedFriends = friends.filter(f => f.selected);
   const totalBillNumber = parseFloat(billAmount) || 0;
-  const userShare = totalBillNumber > 0 ? (totalBillNumber / totalCount) : 0;
-  const friendShare = totalBillNumber > 0 ? (totalBillNumber / totalCount) : 0;
+
+  // Use Exact Zero-Loss Split Algorithm
+  const participants: Participant[] = [
+    { id: "me", name: "You (Payer)", isPayer: true, selected: true },
+    ...friends.map(f => ({ id: f.id, name: f.name, selected: f.selected }))
+  ];
+  const splitResults = calculateExactSplit(totalBillNumber, participants);
+  const userShareResult = splitResults.find(r => r.participantId === "me");
+  const userShare = userShareResult ? userShareResult.amount : 0;
+  const friendShareResult = splitResults.find(r => r.participantId !== "me");
+  const friendShare = friendShareResult ? friendShareResult.amount : 0;
+  const totalCount = splitResults.length;
 
   const formatAmt = (val: number) => {
     if (currency === "INR") {
@@ -165,7 +198,7 @@ export const SplitBillModal: React.FC<SplitBillModalProps> = ({ isOpen, onClose 
         {/* Action Icon Strip */}
         <div className="grid grid-cols-4 gap-2 my-4">
           <button
-            onClick={() => alert("Receipt uploaded and auto-scanned via OCR!")}
+            onClick={() => setOcrNotice(prev => !prev)}
             className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-slate-50 dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 border border-slate-200/80 dark:border-zinc-800 transition-all group cursor-pointer"
           >
             <div className="w-9 h-9 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 flex items-center justify-center mb-1 group-hover:scale-105 transition-transform">
@@ -188,9 +221,9 @@ export const SplitBillModal: React.FC<SplitBillModalProps> = ({ isOpen, onClose 
 
           <button
             onClick={() => {
-              const url = `https://wa.me/?text=${encodeURIComponent(
+              const url = generateWhatsAppLink(
                 `Hey! Split request for ${merchantName}: ${formatAmt(friendShare)} each via BudgetMitra.`
-              )}`;
+              );
               window.open(url, "_blank");
             }}
             className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-slate-50 dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 border border-slate-200/80 dark:border-zinc-800 transition-all group cursor-pointer"
@@ -202,20 +235,7 @@ export const SplitBillModal: React.FC<SplitBillModalProps> = ({ isOpen, onClose 
           </button>
 
           <button
-            onClick={() => {
-              const newName = prompt("Enter friend's name:");
-              if (newName) {
-                setFriends(prev => [
-                  ...prev,
-                  {
-                    id: `f_${Date.now()}`,
-                    name: newName,
-                    avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80",
-                    selected: true,
-                  },
-                ]);
-              }
-            }}
+            onClick={() => setShowAddFriend(prev => !prev)}
             className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all group cursor-pointer"
           >
             <div className="w-9 h-9 rounded-xl bg-emerald-500 text-white flex items-center justify-center mb-1 group-hover:scale-105 transition-transform">
@@ -224,6 +244,41 @@ export const SplitBillModal: React.FC<SplitBillModalProps> = ({ isOpen, onClose 
             <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400">Add</span>
           </button>
         </div>
+
+        {/* OCR Informational Banner */}
+        {ocrNotice && (
+          <div className="mb-4 p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 text-xs text-blue-700 dark:text-blue-300 flex items-center gap-2">
+            <Info className="w-4 h-4 shrink-0" />
+            <span>AI Receipt OCR is available on the main Split Bill screen or via Quick Log.</span>
+          </div>
+        )}
+
+        {/* Inline Add Friend Form */}
+        {showAddFriend && (
+          <form onSubmit={handleAddFriendSubmit} className="mb-4 p-3 rounded-2xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 flex gap-2">
+            <input
+              type="text"
+              placeholder="Friend's Name"
+              value={newFriendName}
+              onChange={(e) => setNewFriendName(e.target.value)}
+              className="flex-1 px-3 py-1.5 rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs font-semibold text-slate-900 dark:text-white outline-none"
+              autoFocus
+            />
+            <button
+              type="submit"
+              className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold transition-colors cursor-pointer"
+            >
+              Add
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAddFriend(false)}
+              className="px-2 py-1.5 rounded-xl text-slate-400 hover:text-slate-600 text-xs font-semibold"
+            >
+              Cancel
+            </button>
+          </form>
+        )}
 
         {/* Friend Selector & Split Type */}
         <div className="space-y-3">
@@ -261,12 +316,22 @@ export const SplitBillModal: React.FC<SplitBillModalProps> = ({ isOpen, onClose 
               <div
                 key={f.id}
                 onClick={() => toggleFriend(f.id)}
-                className={`flex flex-col items-center p-2 rounded-2xl border transition-all cursor-pointer select-none ${
+                className={`relative group/friend flex flex-col items-center p-2 rounded-2xl border transition-all cursor-pointer select-none ${
                   f.selected
                     ? "border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30 scale-102"
                     : "border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/50 opacity-60 hover:opacity-100"
                 }`}
               >
+                {/* Delete button (visible on hover) */}
+                <button
+                  type="button"
+                  onClick={(e) => removeFriend(f.id, e)}
+                  title={`Remove ${f.name}`}
+                  className="absolute top-1 right-1 w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center opacity-0 group-hover/friend:opacity-100 transition-opacity hover:bg-rose-600 z-10"
+                >
+                  <Trash2 className="w-2.5 h-2.5" />
+                </button>
+
                 <div className="relative w-11 h-11 rounded-full overflow-hidden mb-1 border-2 border-white dark:border-zinc-800 shadow-xs">
                   <img src={f.avatar} alt={f.name} className="w-full h-full object-cover" />
                   {f.selected && (
