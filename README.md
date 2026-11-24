@@ -17,7 +17,7 @@
 
 Over 70% of college students run out of money mid-month due to hidden expenses, impulse buys, and a lack of velocity visibility. **BudgetMitra** is a student-first AI financial co-pilot built to anticipate and prevent allowance exhaustion.
 
-BudgetMitra combines **Google Gemini 2.5 Flash** with **statistical machine learning** (Boris Iglewicz Modified Z-Score with Median Absolute Deviation) to detect irregular spending spikes, forecast the exact calendar date an allowance will be depleted, and provide actionable daily reduction recommendations.
+BudgetMitra combines **Google Gemini 2.5 Flash** with **statistical machine learning** (Boris Iglewicz Modified Z-Score with Median Absolute Deviation) to detect irregular spending spikes, forecast the exact calendar date an allowance will be depleted, and provide actionable daily reduction recommendations.  
 
 ---
 
