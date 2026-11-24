@@ -1,7 +1,8 @@
-import { useState, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { FinancialProvider, useFinancial } from "./context/FinancialContext";
 import { GamificationProvider } from "./context/GamificationContext";
 import { ThemeProvider } from "./context/ThemeContext";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { TopHeader } from "./components/TopHeader";
 import { AskFinBuddyWidget } from "./components/AskFinBuddyWidget";
@@ -10,6 +11,7 @@ import { QuickLogModal } from "./components/QuickLogModal";
 import { BadgeCelebrationModal } from "./components/BadgeCelebrationModal";
 import { OnboardingModal } from "./components/OnboardingModal";
 import { Login } from "./pages/Login";
+import { WifiOff } from "lucide-react";
 
 // ── Lazily loaded sub-pages — each lands in its own JS chunk ──────────────
 const Dashboard     = lazy(() => import("./pages/Dashboard").then((m) => ({ default: m.Dashboard })));
@@ -35,7 +37,19 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [quickLogOpen, setQuickLogOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isOffline, setIsOffline] = useState(typeof navigator !== "undefined" ? !navigator.onLine : false);
   const { isAuthenticated, isGuest, logout, profile } = useFinancial();
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   if (!isAuthenticated) {
     return <Login />;
@@ -68,6 +82,13 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] dark:bg-[#09090b] text-slate-900 dark:text-white flex transition-colors duration-300">
+      {/* Offline Connectivity Notification Banner */}
+      {isOffline && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-slate-950 font-semibold text-xs py-1.5 px-4 text-center flex items-center justify-center gap-2 shadow-md">
+          <WifiOff className="w-3.5 h-3.5" />
+          <span>You are currently offline. Changes are saved locally and will sync when connectivity resumes.</span>
+        </div>
+      )}
       
       {/* Left Sidebar Navigation */}
       <Sidebar
@@ -132,13 +153,15 @@ function AppContent() {
 
 function App() {
   return (
-    <ThemeProvider>
-      <FinancialProvider>
-        <GamificationProvider>
-          <AppContent />
-        </GamificationProvider>
-      </FinancialProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <FinancialProvider>
+          <GamificationProvider>
+            <AppContent />
+          </GamificationProvider>
+        </FinancialProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 

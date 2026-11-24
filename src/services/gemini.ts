@@ -8,13 +8,29 @@ import {
   LOAN_COACH_SYSTEM_PROMPT,
 } from "../lib/prompts/financialAssistant";
 
-// --- Init Gemini (IBM Bob) ---
+// --- Init Gemini Helper (Serverless Proxy Preferred) ---
+export async function queryAIProxy(message: string, systemPrompt?: string): Promise<string | null> {
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, systemPrompt }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.reply) return data.reply;
+    }
+  } catch {
+    /* fallback to local deterministic reasoning */
+  }
+  return null;
+}
+
 const apiKey =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY) ||
-  (typeof window !== "undefined" && typeof localStorage !== "undefined" ? localStorage.getItem("fw_gemini_api_key") : null) ||
   "";
 let genAI: GoogleGenerativeAI | null = null;
-if (apiKey && apiKey !== "YOUR_GEMINI_API_KEY_HERE") {
+if (apiKey && apiKey !== "YOUR_GEMINI_API_KEY_HERE" && apiKey !== "optional_gemini_api_key_here") {
   genAI = new GoogleGenerativeAI(apiKey);
 }
 

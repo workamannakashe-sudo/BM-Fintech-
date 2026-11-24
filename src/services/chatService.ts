@@ -148,19 +148,43 @@ export async function sendChatMessage({
   const sanitizedMessage = sanitizeInput(message.trim());
   if (!sanitizedMessage) return "Please enter a question or query.";
 
-  const apiKey = (typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY) || "";
+  const systemInstruction = buildFinBuddySystemPrompt(financialContext);
 
-  if (apiKey && apiKey !== "optional_gemini_api_key_here") {
+  // 1. Try secure serverless proxy endpoint
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: sanitizedMessage,
+        systemPrompt: systemInstruction,
+        chatHistory,
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.reply && typeof data.reply === "string") {
+        return data.reply.trim();
+      }
+    }
+  } catch (apiErr) {
+    // Server endpoint not reachable or running in offline client mode
+    console.info("[FinBuddy] Serverless proxy unreachable, using local reasoning engine:", apiErr);
+  }
+
+  // 2. Local dev optional key fallback (if configured)
+  const clientKey = (typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY) || "";
+  if (clientKey && clientKey !== "optional_gemini_api_key_here") {
     try {
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const systemInstruction = buildFinBuddySystemPrompt(financialContext);
-
+      const genAI = new GoogleGenerativeAI(clientKey);
       const model = genAI.getGenerativeModel({
         model: "gemini-2.5-flash",
         systemInstruction,
       });
 
-      // Build multi-turn history
       const history = chatHistory.slice(-10).map((item) => ({
         role: item.role === "user" ? "user" : "model",
         parts: [{ text: item.content }],
@@ -169,16 +193,13 @@ export async function sendChatMessage({
       const chat = model.startChat({ history });
       const result = await chat.sendMessage(sanitizedMessage);
       const text = result.response.text();
-
-      if (text) {
-        return text.trim();
-      }
-    } catch (err) {
-      console.warn("sendChatMessage: Gemini live call failed, falling back to local heuristic intelligence:", err);
+      if (text) return text.trim();
+    } catch {
+      /* fall through to heuristic */
     }
   }
 
-  // Deterministic local reasoning fallback
+  // 3. Deterministic local reasoning fallback
   return generateHeuristicResponse(sanitizedMessage, financialContext);
 }
 
